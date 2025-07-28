@@ -1,0 +1,1120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pulsar Galaxy Explorer with Sound</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000000;
+      color: white;
+      font-family: 'Courier New', monospace;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #ui {
+      position: absolute;
+      top: 15px;
+      width: 100%;
+      text-align: center;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    #info {
+      font-size: 14px;
+      padding: 10px 18px;
+      background-color: rgba(25, 30, 50, 0.35);
+      border-radius: 10px;
+      display: inline-block;
+      text-shadow: 0 0 5px rgba(0, 128, 255, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      transition: all 0.3s ease;
+      box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.05);
+    }
+
+    #loading {
+      position: fixed;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      transition: opacity 0.6s ease-out;
+    }
+
+    #loading span {
+      font-size: 24px;
+      letter-spacing: 2px;
+      margin-bottom: 15px;
+    }
+
+    #progress-container {
+      width: 60%;
+      max-width: 300px;
+      height: 6px;
+      background-color: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    #progress {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #00a2ff, #00ffea);
+      transition: width 0.3s ease;
+      border-radius: 3px;
+    }
+
+    #pulsar-details {
+      position: absolute;
+      top: 80px;
+      right: 20px;
+      width: 300px;
+      background-color: rgba(25, 30, 50, 0.6);
+      border-radius: 10px;
+      padding: 15px;
+      z-index: 100;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      transform: translateX(350px);
+      transition: transform 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.0);
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+
+    #pulsar-details.visible {
+      transform: translateX(0);
+    }
+
+    #pulsar-details h3 {
+      margin-top: 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+      padding-bottom: 8px;
+    }
+
+    #pulsar-details h4 {
+      margin: 15px 0 10px 0;
+      color: #00ffea;
+      font-size: 14px;
+      border-bottom: 1px solid rgba(0, 255, 234, 0.3);
+      padding-bottom: 5px;
+    }
+
+    #pulsar-video-section {
+      margin-top: 15px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 15px;
+    }
+
+    #video-container {
+      position: relative;
+      margin: 10px 0;
+      border: 1px solid rgba(0, 255, 234, 0.3);
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.5);
+    }
+
+    #pulsar-display-video {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .pulsar-property {
+      margin: 10px 0;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .pulsar-property-name {
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .pulsar-property-value {
+      font-weight: bold;
+      color: #00ffea;
+    }
+
+    #controls {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+      text-align: center;
+      background-color: rgba(25, 30, 50, 0.4);
+      padding: 15px 25px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+      pointer-events: all;
+    }
+    
+    #audio-controls {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      pointer-events: all;
+    }
+    
+    #volume-slider {
+      width: 80px;
+      margin-left: 10px;
+      accent-color: #00a2ff;
+    }
+
+    button {
+      background: rgba(0, 80, 180, 0.7);
+      color: white;
+      border: 1px solid rgba(0, 180, 255, 0.6);
+      border-radius: 6px;
+      padding: 8px 15px;
+      margin: 0 8px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      transition: all 0.25s ease;
+    }
+
+    button:hover {
+      background: rgba(0, 110, 220, 0.9);
+      border-color: rgba(0, 210, 255, 0.9);
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(0, 150, 255, 0.3);
+    }
+
+    #stats {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      background-color: rgba(25, 30, 50, 0.4);
+      padding: 10px 15px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(12px);
+      font-size: 12px;
+      z-index: 100;
+    }
+
+    #error-display {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      background-color: rgba(255, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      z-index: 10000;
+      font-family: monospace;
+      font-size: 14px;
+      max-height: 50%;
+      overflow: auto;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="error-display"></div>
+  
+  <div id="loading">
+    <span>Loading Pulsar Galaxy...</span>
+    <div id="progress-container">
+      <div id="progress"></div>
+    </div>
+  </div>
+
+  <div id="ui">
+    <div id="info">Pulsar Galaxy Explorer - 4,342 Pulsars with Real Video<br>
+    <small>Click pulsars to see real pulsar videos at their actual frequencies • Video speed adjusts to match each pulsar's period</small>
+    </div>
+  </div>
+  
+  <div id="audio-controls">
+    <button id="audio-toggle" title="Toggle Audio">🔊</button>
+    <input type="range" id="volume-slider" min="0" max="100" value="15">
+  </div>
+
+  <div id="pulsar-details">
+    <h3>Pulsar Information</h3>
+    <div class="pulsar-property">
+      <span class="pulsar-property-name">Name:</span>
+      <span class="pulsar-property-value" id="pulsar-name">-</span>
+    </div>
+    <div class="pulsar-property">
+      <span class="pulsar-property-name">Association:</span>
+      <span class="pulsar-property-value" id="pulsar-assoc">-</span>
+    </div>
+    <div class="pulsar-property">
+      <span class="pulsar-property-name">Period:</span>
+      <span class="pulsar-property-value" id="pulsar-period">-</span>
+    </div>
+    <div class="pulsar-property">
+      <span class="pulsar-property-name">Frequency:</span>
+      <span class="pulsar-property-value" id="pulsar-frequency">-</span>
+    </div>
+    <div class="pulsar-property">
+      <span class="pulsar-property-name">Distance:</span>
+      <span class="pulsar-property-value" id="pulsar-distance">-</span>
+    </div>
+    <div class="pulsar-property">
+      <span class="pulsar-property-name">DM:</span>
+      <span class="pulsar-property-value" id="pulsar-dm">-</span>
+    </div>
+    
+    <!-- Video display section -->
+    <div id="pulsar-video-section">
+      <h4>Real Pulsar Animation</h4>
+      <div id="video-container">
+        <video id="pulsar-display-video" width="260" height="195" loop muted>
+          <source src="./PulsarWithProfile.480p.mp4" type="video/mp4">
+          Your browser does not support the video tag.
+        </video>
+      </div>
+      <div class="pulsar-property">
+        <span class="pulsar-property-name">Video Speed:</span>
+        <span class="pulsar-property-value" id="video-speed">1.0x</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button id="view-all-btn">View All (4,342)</button>
+    <button id="fast-pulsars-btn">Fast Pulsars (966)</button>
+    <button id="slow-pulsars-btn">Slow Pulsars (1,169)</button>
+    <button id="deselect-btn">Deselect Pulsar</button>
+  </div>
+
+  <div id="stats">
+    <div>Visible: <span id="visible-count">0</span></div>
+    <div>Selected: <span id="selected-pulsar">None</span></div>
+  </div>
+
+  <canvas id="webglCanvas"></canvas>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    // Import Three.js modules
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { pulsarData, pulsarStats } from './csv_pulsar_data.js';
+
+    // Error handling
+    window.addEventListener('error', function(e) {
+      const errorDisplay = document.getElementById('error-display');
+      errorDisplay.style.display = 'block';
+      errorDisplay.textContent += `ERROR: ${e.message} at ${e.filename}:${e.lineno}\n`;
+      console.error(e);
+    });
+
+    // Global variables
+    let scene, camera, renderer, controls, clock;
+    let composer, bloomPass;
+    let starfield, pulsarSystem;
+    let isInitialized = false;
+    
+    // Audio variables
+    let audioContext, audioAnalyser, audioGain;
+    let isAudioInitialized = false;
+    let activeAudioOscillator = null;
+    let audioEnabled = true;
+
+    // Display video for selected pulsar
+    let displayVideo;
+    let pulsarVideo; // Video element for info panel
+
+    // Pulsar management
+    const pulsars = [];
+    let selectedPulsar = null;
+    let currentViewMode = 'all';
+    let visiblePulsars = [];
+    let selectedPulsarEffects = null; // For enhanced visual effects
+
+    // Configuration
+    const CONFIG = {
+      galaxyRadius: 50,
+      galaxyThickness: 8,
+      starCount: 5000,
+      pulsarSizeRange: [0.08, 0.3],
+      fastPulsarThreshold: 0.1,
+      slowPulsarThreshold: 1.0,
+      bloomStrength: 1.5,
+      bloomRadius: 0.5,
+      bloomThreshold: 0.05,
+      selectedPulsarScale: 2.0,
+      defaultVolume: 0.15,
+      maxRenderDistance: 100,
+      performanceMode: pulsarData.length > 2000 // Enable performance mode for large datasets
+    };
+
+    console.log(`Loading ${pulsarStats.total} pulsars...`);
+    console.log(`Fast: ${pulsarStats.fastPulsars}, Medium: ${pulsarStats.mediumPulsars}, Slow: ${pulsarStats.slowPulsars}`);
+
+    // Initialize display video for pulsar information panel
+    function initDisplayVideo() {
+      displayVideo = document.getElementById('pulsar-display-video');
+      displayVideo.addEventListener('loadeddata', () => {
+        console.log('Pulsar display video loaded successfully');
+      });
+      
+      displayVideo.addEventListener('error', (e) => {
+        console.error('Error loading pulsar display video:', e);
+      });
+    }
+
+    // Initialize video for info panel
+    function initVideo() {
+      pulsarVideo = document.getElementById('pulsar-video');
+      if (pulsarVideo) {
+        pulsarVideo.addEventListener('loadeddata', () => {
+          console.log('Pulsar video loaded successfully for info panel');
+        });
+        
+        pulsarVideo.addEventListener('error', (e) => {
+          console.error('Error loading pulsar video for info panel:', e);
+        });
+        
+        // Start with video hidden
+        pulsarVideo.style.display = 'none';
+      } else {
+        console.warn('Pulsar video element not found in info panel');
+      }
+    }
+
+    // Initialize audio system
+    function initAudio() {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioGain = audioContext.createGain();
+        audioGain.gain.value = CONFIG.defaultVolume;
+        audioAnalyser = audioContext.createAnalyser();
+        audioAnalyser.fftSize = 2048;
+        
+        audioGain.connect(audioAnalyser);
+        audioAnalyser.connect(audioContext.destination);
+        
+        isAudioInitialized = true;
+        console.log("Audio system initialized");
+        
+        // Set initial volume slider value
+        document.getElementById('volume-slider').value = CONFIG.defaultVolume * 100;
+      } catch (error) {
+        console.error("Failed to initialize audio:", error);
+      }
+    }
+
+    // Play pulsar sound
+    function playPulsarSound(pulsar) {
+      stopPulsarSound();
+      
+      if (!isAudioInitialized || !audioEnabled) return;
+      
+      try {
+        if (audioContext.state === 'suspended') {
+          audioContext.resume();
+        }
+        
+        const period = pulsar.period;
+        if (!period || period <= 0) return;
+        
+        // Calculate actual pulsar frequency (pulses per second)
+        const pulsarFrequency = 1 / period; // Hz (pulses per second)
+        
+        // For very fast pulsars (>20 Hz), use the frequency directly as audio tone
+        // For slower pulsars (<20 Hz), use a base tone with pulsing at the real frequency
+        let audioFrequency, pulseRate;
+        
+        if (pulsarFrequency >= 20) {
+          // Fast pulsars: use the actual frequency as audio tone
+          audioFrequency = Math.min(2000, pulsarFrequency); // Cap at 2kHz for hearing safety
+          pulseRate = 0; // No additional pulsing needed
+        } else {
+          // Slower pulsars: use a base tone with pulsing at real frequency
+          // Map to audible range (200-800 Hz base tone)
+          const minFreq = 200;
+          const maxFreq = 800;
+          const logPeriod = Math.log(period);
+          const logMin = Math.log(0.05); // 20 Hz
+          const logMax = Math.log(10);   // 0.1 Hz
+          const normalizedLog = Math.max(0, Math.min(1, (logPeriod - logMin) / (logMax - logMin)));
+          audioFrequency = minFreq + (1 - normalizedLog) * (maxFreq - minFreq);
+          pulseRate = pulsarFrequency; // Use actual pulsar frequency for pulsing
+        }
+        
+        // Create oscillator for the base tone
+        const oscillator = audioContext.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(audioFrequency, audioContext.currentTime);
+        
+        // Create gain modulator for pulsing effect
+        const modulator = audioContext.createGain();
+        
+        if (pulseRate > 0) {
+          // Apply pulsing at the actual pulsar frequency
+          modulator.gain.value = 0.1; // Base volume
+          
+          const now = audioContext.currentTime;
+          const pulseDuration = Math.min(0.1, period * 0.1); // 10% of period, max 0.1s
+          const totalDuration = 10; // Play for 10 seconds
+          const totalPulses = Math.ceil(totalDuration * pulseRate);
+          
+          // Schedule pulses at the exact pulsar frequency
+          for (let i = 0; i < totalPulses; i++) {
+            const pulseTime = now + (i / pulseRate);
+            
+            // Sharp pulse: quick rise to full volume, then decay
+            modulator.gain.setValueAtTime(0.1, pulseTime);
+            modulator.gain.linearRampToValueAtTime(1.0, pulseTime + pulseDuration * 0.1);
+            modulator.gain.exponentialRampToValueAtTime(0.1, pulseTime + pulseDuration);
+          }
+        } else {
+          // Constant tone for very fast pulsars
+          modulator.gain.value = 0.5;
+        }
+        
+        // Connect audio chain
+        oscillator.connect(modulator);
+        modulator.connect(audioGain);
+        oscillator.start();
+        
+        // Schedule stop after 10 seconds
+        oscillator.stop(audioContext.currentTime + 10);
+        
+        activeAudioOscillator = { oscillator, modulator };
+        
+        const description = pulseRate > 0 ? 
+          `${pulsarFrequency.toFixed(3)} Hz pulses on ${audioFrequency.toFixed(0)} Hz tone` :
+          `${pulsarFrequency.toFixed(0)} Hz direct frequency`;
+        
+        console.log(`Playing ${pulsar.name}: ${period}s period = ${description}`);
+      } catch (error) {
+        console.error("Failed to play pulsar sound:", error);
+      }
+    }
+
+    // Stop pulsar sound
+    function stopPulsarSound() {
+      if (activeAudioOscillator) {
+        try {
+          activeAudioOscillator.oscillator.stop();
+          activeAudioOscillator.oscillator.disconnect();
+          activeAudioOscillator.modulator.disconnect();
+        } catch (error) {
+          console.error("Error stopping sound:", error);
+        }
+        activeAudioOscillator = null;
+      }
+    }
+
+    // Create enhanced visual effects for selected pulsar
+    function createPulsarEffects(pulsar) {
+      const effects = {
+        particles: null,
+        rings: [],
+        beams: [],
+        group: new THREE.Group()
+      };
+      
+      const pulsarPos = pulsar.position;
+      const period = pulsar.userData.period;
+      const color = pulsar.userData.colorTint || pulsar.userData.color || new THREE.Color(0x00ffea);
+      
+      // 1. Particle system for pulsar wind/emissions
+      const particleCount = Math.min(1000, Math.max(200, Math.floor(1000 / period)));
+      const particleGeometry = new THREE.BufferGeometry();
+      const particlePositions = new Float32Array(particleCount * 3);
+      const particleVelocities = new Float32Array(particleCount * 3);
+      const particleSizes = new Float32Array(particleCount);
+      const particleColors = new Float32Array(particleCount * 3);
+      
+      for (let i = 0; i < particleCount; i++) {
+        // Start particles at pulsar position with slight randomness
+        particlePositions[i * 3] = pulsarPos.x + (Math.random() - 0.5) * 0.5;
+        particlePositions[i * 3 + 1] = pulsarPos.y + (Math.random() - 0.5) * 0.5;
+        particlePositions[i * 3 + 2] = pulsarPos.z + (Math.random() - 0.5) * 0.5;
+        
+        // Random velocities for particle expansion
+        const phi = Math.random() * Math.PI * 2;
+        const theta = Math.random() * Math.PI;
+        const speed = 0.5 + Math.random() * 1.5;
+        
+        particleVelocities[i * 3] = Math.sin(theta) * Math.cos(phi) * speed;
+        particleVelocities[i * 3 + 1] = Math.cos(theta) * speed;
+        particleVelocities[i * 3 + 2] = Math.sin(theta) * Math.sin(phi) * speed;
+        
+        particleSizes[i] = 0.1 + Math.random() * 0.2;
+        
+        // Color variations based on pulsar color
+        particleColors[i * 3] = color.r + (Math.random() - 0.5) * 0.3;
+        particleColors[i * 3 + 1] = color.g + (Math.random() - 0.5) * 0.3;
+        particleColors[i * 3 + 2] = color.b + (Math.random() - 0.5) * 0.3;
+      }
+      
+      particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+      particleGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
+      particleGeometry.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+      
+      const particleMaterial = new THREE.PointsMaterial({
+        size: 0.1,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending
+      });
+      
+      effects.particles = new THREE.Points(particleGeometry, particleMaterial);
+      effects.particles.userData = { velocities: particleVelocities, originalPositions: particlePositions.slice() };
+      effects.group.add(effects.particles);
+      
+      // 2. Pulsing rings at different scales
+      for (let i = 0; i < 3; i++) {
+        const ringGeometry = new THREE.RingGeometry(0.5 + i * 0.3, 0.6 + i * 0.3, 32);
+        const ringMaterial = new THREE.MeshBasicMaterial({
+          color: color,
+          transparent: true,
+          opacity: 0.3 - i * 0.1,
+          side: THREE.DoubleSide,
+          blending: THREE.AdditiveBlending
+        });
+        
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.position.copy(pulsarPos);
+        ring.userData = { 
+          originalScale: 1,
+          pulsePhase: i * (Math.PI * 2 / 3), // Offset phases
+          pulseSpeed: 1 / period
+        };
+        
+        effects.rings.push(ring);
+        effects.group.add(ring);
+      }
+      
+      // 3. Rotating beams for fast pulsars
+      if (period < 1) {
+        for (let i = 0; i < 2; i++) {
+          const beamGeometry = new THREE.CylinderGeometry(0.02, 0.02, 8, 8);
+          const beamMaterial = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.4,
+            blending: THREE.AdditiveBlending
+          });
+          
+          const beam = new THREE.Mesh(beamGeometry, beamMaterial);
+          beam.position.copy(pulsarPos);
+          beam.rotation.z = i * Math.PI; // Opposite beams
+          beam.userData = { 
+            rotationSpeed: (1 / period) * 2 * Math.PI,
+            axis: i
+          };
+          
+          effects.beams.push(beam);
+          effects.group.add(beam);
+        }
+      }
+      
+      effects.group.position.copy(pulsarPos);
+      scene.add(effects.group);
+      
+      return effects;
+    }
+    
+    // Remove pulsar effects
+    function removePulsarEffects() {
+      if (selectedPulsarEffects) {
+        scene.remove(selectedPulsarEffects.group);
+        
+        // Clean up geometries and materials
+        if (selectedPulsarEffects.particles) {
+          selectedPulsarEffects.particles.geometry.dispose();
+          selectedPulsarEffects.particles.material.dispose();
+        }
+        
+        selectedPulsarEffects.rings.forEach(ring => {
+          ring.geometry.dispose();
+          ring.material.dispose();
+        });
+        
+        selectedPulsarEffects.beams.forEach(beam => {
+          beam.geometry.dispose();
+          beam.material.dispose();
+        });
+        
+        selectedPulsarEffects = null;
+      }
+    }
+    
+    // Update pulsar effects animation
+    function updatePulsarEffects(deltaTime, elapsedTime) {
+      if (!selectedPulsarEffects) return;
+      
+      const period = selectedPulsar.userData.period;
+      const frequency = 1 / period;
+      
+      // Update particles
+      if (selectedPulsarEffects.particles) {
+        const positions = selectedPulsarEffects.particles.geometry.attributes.position.array;
+        const velocities = selectedPulsarEffects.particles.userData.velocities;
+        const originalPositions = selectedPulsarEffects.particles.userData.originalPositions;
+        
+        for (let i = 0; i < positions.length; i += 3) {
+          // Move particles outward
+          positions[i] += velocities[i] * deltaTime * 5;
+          positions[i + 1] += velocities[i + 1] * deltaTime * 5;
+          positions[i + 2] += velocities[i + 2] * deltaTime * 5;
+          
+          // Reset particles that go too far
+          const distance = Math.sqrt(
+            Math.pow(positions[i] - selectedPulsar.position.x, 2) +
+            Math.pow(positions[i + 1] - selectedPulsar.position.y, 2) +
+            Math.pow(positions[i + 2] - selectedPulsar.position.z, 2)
+          );
+          
+          if (distance > 5) {
+            positions[i] = originalPositions[i] + selectedPulsar.position.x;
+            positions[i + 1] = originalPositions[i + 1] + selectedPulsar.position.y;
+            positions[i + 2] = originalPositions[i + 2] + selectedPulsar.position.z;
+          }
+        }
+        
+        selectedPulsarEffects.particles.geometry.attributes.position.needsUpdate = true;
+      }
+      
+      // Update rings
+      selectedPulsarEffects.rings.forEach((ring, index) => {
+        const pulsePhase = ring.userData.pulsePhase + elapsedTime * ring.userData.pulseSpeed * Math.PI * 2;
+        const pulseScale = 1 + Math.sin(pulsePhase) * 0.5;
+        ring.scale.setScalar(pulseScale);
+        ring.material.opacity = (0.3 - index * 0.1) * (0.5 + Math.sin(pulsePhase) * 0.5);
+        
+        // Rotate rings slowly
+        ring.rotation.z += deltaTime * frequency * 0.5;
+      });
+      
+      // Update beams (for fast pulsars)
+      selectedPulsarEffects.beams.forEach(beam => {
+        beam.rotation.y += deltaTime * beam.userData.rotationSpeed;
+        
+        // Pulse beam intensity
+        const pulseIntensity = 0.4 + Math.sin(elapsedTime * frequency * Math.PI * 2) * 0.3;
+        beam.material.opacity = pulseIntensity;
+      });
+    }
+
+    // Create starfield background
+    function createStarfield() {
+      const starGeometry = new THREE.BufferGeometry();
+      const starPositions = new Float32Array(CONFIG.starCount * 3);
+      const starColors = new Float32Array(CONFIG.starCount * 3);
+      
+      for (let i = 0; i < CONFIG.starCount; i++) {
+        // Galaxy disk distribution
+        const radius = Math.sqrt(Math.random()) * CONFIG.galaxyRadius;
+        const angle = Math.random() * Math.PI * 2;
+        const height = (Math.random() - 0.5) * CONFIG.galaxyThickness;
+        
+        starPositions[i * 3] = Math.cos(angle) * radius;
+        starPositions[i * 3 + 1] = height;
+        starPositions[i * 3 + 2] = Math.sin(angle) * radius;
+        
+        // Bluish white colors
+        starColors[i * 3] = 0.8 + Math.random() * 0.2;     // R
+        starColors[i * 3 + 1] = 0.8 + Math.random() * 0.2; // G
+        starColors[i * 3 + 2] = 1.0;                       // B
+      }
+      
+      starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+      starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+      
+      const starMaterial = new THREE.PointsMaterial({
+        size: 0.1,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.8
+      });
+      
+      starfield = new THREE.Points(starGeometry, starMaterial);
+      scene.add(starfield);
+    }
+
+    // Create pulsar objects
+    function createPulsars() {
+      // Use simple sphere geometry for point-like sources
+      const pulsarGeometry = new THREE.SphereGeometry(1, 16, 16);
+      
+      // Process pulsars in chunks for better performance
+      let processedCount = 0;
+      const chunkSize = 100;
+      
+      function processChunk() {
+        const endIndex = Math.min(processedCount + chunkSize, pulsarData.length);
+        
+        for (let i = processedCount; i < endIndex; i++) {
+          const pulsarInfo = pulsarData[i];
+          
+          // Convert galactic coordinates to position
+          const distance = pulsarInfo.distance || 10;
+          const gl = pulsarInfo.gl * (Math.PI / 180);
+          const gb = pulsarInfo.gb * (Math.PI / 180);
+          
+          // Position in galactic coordinates
+          const x = distance * Math.cos(gb) * Math.cos(gl);
+          const y = distance * Math.sin(gb);
+          const z = distance * Math.cos(gb) * Math.sin(gl);
+          
+          // Determine color and size based on period
+          let color, size;
+          const period = pulsarInfo.period;
+          
+          if (period < CONFIG.fastPulsarThreshold) {
+            color = new THREE.Color(0x00a2ff); // Blue for fast
+            size = CONFIG.pulsarSizeRange[1];
+          } else if (period < CONFIG.slowPulsarThreshold) {
+            color = new THREE.Color(0x00ffea); // Cyan for medium
+            size = CONFIG.pulsarSizeRange[0] + 0.15;
+          } else {
+            color = new THREE.Color(0xc080ff); // Purple for slow
+            size = CONFIG.pulsarSizeRange[0];
+          }
+          
+          // Create material
+          const pulsarMaterial = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.8
+          });
+          
+          // Create mesh
+          const pulsarMesh = new THREE.Mesh(pulsarGeometry, pulsarMaterial);
+          pulsarMesh.position.set(x, y, z);
+          pulsarMesh.scale.set(size, size, size);
+          
+          // Store pulsar data
+          pulsarMesh.userData = {
+            ...pulsarInfo,
+            originalScale: size,
+            color: color.clone(),
+            originalPosition: new THREE.Vector3(x, y, z)
+          };
+          
+          pulsars.push(pulsarMesh);
+          scene.add(pulsarMesh);
+        }
+        
+        processedCount = endIndex;
+        
+        // Update progress
+        const progress = (processedCount / pulsarData.length) * 80; // Reserve 20% for final setup
+        document.getElementById('progress').style.width = `${progress}%`;
+        
+        if (processedCount < pulsarData.length) {
+          setTimeout(processChunk, 10); // Continue processing
+        } else {
+          finishInitialization();
+        }
+      }
+      
+      processChunk();
+    }
+
+    // Select pulsar
+    function selectPulsar(pulsar) {
+      // Reset previous selection
+      if (selectedPulsar) {
+        selectedPulsar.scale.setScalar(selectedPulsar.userData.originalScale);
+        selectedPulsar.material.opacity = 0.9;
+        removePulsarEffects(); // Remove previous effects
+      }
+      
+      selectedPulsar = pulsar;
+      
+      // Highlight selected pulsar
+      pulsar.scale.setScalar(pulsar.userData.originalScale * CONFIG.selectedPulsarScale);
+      pulsar.material.opacity = 1.0;
+      
+      // Adjust video playback speed to match pulsar frequency
+      const period = pulsar.userData.period;
+      const pulsarFrequency = 1 / period;
+      
+      // The original video shows a 1.3-second pulsar
+      const originalPeriod = 1.3;
+      const speedMultiplier = originalPeriod / period;
+      
+      // Clamp speed for practical viewing (0.1x to 10x)
+      const clampedSpeed = Math.max(0.1, Math.min(10, speedMultiplier));
+      
+      // Control video display in information panel
+      if (pulsarVideo) {
+        pulsarVideo.playbackRate = clampedSpeed;
+        const videoElement = document.getElementById('pulsar-video');
+        if (videoElement) {
+          videoElement.style.display = 'block';
+          pulsarVideo.play();
+        }
+        console.log(`Adjusted video speed: ${clampedSpeed.toFixed(2)}x for ${period.toFixed(3)}s period`);
+      }
+      
+      // Create enhanced visual effects
+      selectedPulsarEffects = createPulsarEffects(pulsar);
+      
+      // Update info panel
+      const detailsPanel = document.getElementById('pulsar-details');
+      detailsPanel.classList.add('visible');
+      
+      document.getElementById('pulsar-name').textContent = pulsar.userData.name || 'Unknown';
+      document.getElementById('pulsar-assoc').textContent = pulsar.userData.association || '-';
+      document.getElementById('pulsar-period').textContent = `${pulsar.userData.period.toFixed(6)}s`;
+      document.getElementById('pulsar-frequency').textContent = `${(1/pulsar.userData.period).toFixed(3)} Hz`;
+      document.getElementById('pulsar-distance').textContent = `${pulsar.userData.distance.toFixed(2)} kpc`;
+      document.getElementById('pulsar-dm').textContent = `${pulsar.userData.dm.toFixed(2)} pc cm⁻³`;
+      
+      document.getElementById('selected-pulsar').textContent = pulsar.userData.name;
+      
+      // Play sound
+      playPulsarSound(pulsar.userData);
+    }
+
+    // Filter pulsars by type
+    function filterPulsars(mode) {
+      currentViewMode = mode;
+      
+      pulsars.forEach(pulsar => {
+        const period = pulsar.userData.period;
+        let visible = false;
+        
+        switch (mode) {
+          case 'all':
+            visible = true;
+            break;
+          case 'fast':
+            visible = period < CONFIG.fastPulsarThreshold;
+            break;
+          case 'slow':
+            visible = period >= CONFIG.slowPulsarThreshold;
+            break;
+        }
+        
+        pulsar.visible = visible;
+      });
+      
+      visiblePulsars = pulsars.filter(p => p.visible);
+      document.getElementById('visible-count').textContent = visiblePulsars.length;
+    }
+
+    // Mouse interaction
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    function onMouseClick(event) {
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(visiblePulsars);
+      
+      if (intersects.length > 0) {
+        selectPulsar(intersects[0].object);
+      }
+    }
+
+    // Finish initialization
+    function finishInitialization() {
+      // Setup post-processing
+      composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      
+      bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(window.innerWidth, window.innerHeight),
+        CONFIG.bloomStrength,
+        CONFIG.bloomRadius,
+        CONFIG.bloomThreshold
+      );
+      composer.addPass(bloomPass);
+      
+      // Final setup
+      filterPulsars('all');
+      
+      // Complete loading
+      document.getElementById('progress').style.width = '100%';
+      setTimeout(() => {
+        const loadingScreen = document.getElementById('loading');
+        loadingScreen.style.opacity = '0';
+        setTimeout(() => {
+          loadingScreen.style.display = 'none';
+          isInitialized = true;
+        }, 600);
+      }, 500);
+      
+      console.log("Pulsar Galaxy Explorer initialized with", pulsars.length, "pulsars");
+    }
+
+    // Initialize visualization
+    function init() {
+      // Setup Three.js
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x000011);
+      
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 20, 40);
+      
+      renderer = new THREE.WebGLRenderer({
+        canvas: document.getElementById('webglCanvas'),
+        antialias: true
+      });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.maxDistance = 200;
+      
+      clock = new THREE.Clock();
+      
+      // Add lighting
+      const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+      scene.add(ambientLight);
+      
+      // Initialize audio
+      initAudio();
+      
+      // Initialize video for info panel display
+      initVideo();
+      
+      // Create scene objects
+      createStarfield();
+      createPulsars();
+      
+      // Event listeners
+      window.addEventListener('click', onMouseClick, false);
+      window.addEventListener('resize', onWindowResize, false);
+      
+      // UI event listeners
+      document.getElementById('view-all-btn').addEventListener('click', () => filterPulsars('all'));
+      document.getElementById('fast-pulsars-btn').addEventListener('click', () => filterPulsars('fast'));
+      document.getElementById('slow-pulsars-btn').addEventListener('click', () => filterPulsars('slow'));
+      
+      document.getElementById('deselect-btn').addEventListener('click', () => {
+        if (selectedPulsar) {
+          selectedPulsar.scale.setScalar(selectedPulsar.userData.originalScale);
+          selectedPulsar.material.opacity = 0.9;
+          removePulsarEffects();
+          selectedPulsar = null;
+          
+          // Reset and hide video
+          if (pulsarVideo) {
+            pulsarVideo.playbackRate = 1.0;
+            pulsarVideo.pause();
+            const videoElement = document.getElementById('pulsar-video');
+            if (videoElement) {
+              videoElement.style.display = 'none';
+            }
+          }
+          
+          document.getElementById('pulsar-details').classList.remove('visible');
+          document.getElementById('selected-pulsar').textContent = 'None';
+          stopPulsarSound();
+        }
+      });
+      
+      document.getElementById('audio-toggle').addEventListener('click', () => {
+        audioEnabled = !audioEnabled;
+        document.getElementById('audio-toggle').textContent = audioEnabled ? '🔊' : '🔇';
+        if (!audioEnabled) stopPulsarSound();
+      });
+      
+      document.getElementById('volume-slider').addEventListener('input', (e) => {
+        if (audioGain) {
+          audioGain.gain.value = e.target.value / 100;
+        }
+      });
+    }
+
+    // Window resize handler
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      if (composer) {
+        composer.setSize(window.innerWidth, window.innerHeight);
+      }
+    }
+
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      if (!isInitialized) return;
+      
+      const deltaTime = clock.getDelta();
+      const elapsedTime = clock.getElapsedTime();
+      
+      // Animate pulsars
+      pulsars.forEach(pulsar => {
+        if (!pulsar.visible) return;
+        
+        // Billboard effect - make pulsars face camera
+        if (pulsar.userData.isBillboard) {
+          pulsar.lookAt(camera.position);
+        }
+        
+        // Gentle breathing animation for non-selected pulsars
+        if (pulsar !== selectedPulsar) {
+          const period = pulsar.userData.period;
+          const pulseFreq = Math.min(2, 1 / period); // Gentler animation
+          const pulse = Math.sin(elapsedTime * pulseFreq * Math.PI * 2) * 0.05 + 1;
+          pulsar.scale.setScalar(pulsar.userData.originalScale * pulse);
+        }
+      });
+      
+      // Update enhanced visual effects for selected pulsar
+      updatePulsarEffects(deltaTime, elapsedTime);
+      
+      // Update controls
+      controls.update();
+      
+      // Render
+      if (composer) {
+        composer.render();
+      } else {
+        renderer.render(scene, camera);
+      }
+    }
+
+    // Start the application
+    init();
+    animate();
+
+  </script>
+</body>
+</html>
