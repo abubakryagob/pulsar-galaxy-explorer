@@ -1,101 +1,198 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pulsar Galaxy Explorer with Sound</title>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background-color: #000000;
-      color: white;
-      font-family: 'Courier New', monospace;
-    }
+<!DOCTYPE html><!DOCTYPE html>
 
-    canvas {
-      display: block;
+<html lang="en"><html lang="en">
+
+<head><head>
+
+  <meta charset="UTF-8">  <meta charset="UTF-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Pulsar Galaxy Explorer</title>  <title>Pulsar Galaxy Explorer with Sound</title>
+
+  <link rel="stylesheet" href="assets/css/style.css">  <style>
+
+</head>    body {
+
+<body>      margin: 0;
+
+  <div id="error-display"></div>      overflow: hidden;
+
+        background-color: #000000;
+
+  <div id="loading">      color: white;
+
+    <span>Loading Pulsar Galaxy...</span>      font-family: 'Courier New', monospace;
+
+    <div id="progress-container">    }
+
+      <div id="progress"></div>
+
+    </div>    canvas {
+
+  </div>      display: block;
+
       width: 100%;
-      height: 100%;
+
+  <div id="ui">      height: 100%;
+
+    <div id="info">Pulsar Galaxy Explorer - 4,342 Pulsars with Real Video<br>    }
+
+    <small>Click pulsars to see real pulsar videos at their actual frequencies • Video speed adjusts to match each pulsar's period</small>
+
+    </div>    #ui {
+
+  </div>      position: absolute;
+
+        top: 15px;
+
+  <div id="audio-controls">      width: 100%;
+
+    <button id="audio-toggle" title="Toggle Audio">🔊</button>      text-align: center;
+
+    <input type="range" id="volume-slider" min="0" max="100" value="15">      z-index: 100;
+
+  </div>      pointer-events: none;
+
     }
 
-    #ui {
-      position: absolute;
-      top: 15px;
-      width: 100%;
-      text-align: center;
-      z-index: 100;
-      pointer-events: none;
+  <div id="pulsar-details">
+
+    <h3>Pulsar Information</h3>    #info {
+
+    <div class="pulsar-property">      font-size: 14px;
+
+      <span class="pulsar-property-name">Name:</span>      padding: 10px 18px;
+
+      <span class="pulsar-property-value" id="pulsar-name">-</span>      background-color: rgba(25, 30, 50, 0.35);
+
+    </div>      border-radius: 10px;
+
+    <div class="pulsar-property">      display: inline-block;
+
+      <span class="pulsar-property-name">Association:</span>      text-shadow: 0 0 5px rgba(0, 128, 255, 0.8);
+
+      <span class="pulsar-property-value" id="pulsar-assoc">-</span>      border: 1px solid rgba(255, 255, 255, 0.1);
+
+    </div>      backdrop-filter: blur(10px);
+
+    <div class="pulsar-property">      -webkit-backdrop-filter: blur(10px);
+
+      <span class="pulsar-property-name">Period:</span>      transition: all 0.3s ease;
+
+      <span class="pulsar-property-value" id="pulsar-period">-</span>      box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.05);
+
+    </div>    }
+
+    <div class="pulsar-property">
+
+      <span class="pulsar-property-name">Frequency:</span>    #loading {
+
+      <span class="pulsar-property-value" id="pulsar-frequency">-</span>      position: fixed;
+
+    </div>      width: 100%;
+
+    <div class="pulsar-property">      height: 100%;
+
+      <span class="pulsar-property-name">Distance:</span>      background: #000;
+
+      <span class="pulsar-property-value" id="pulsar-distance">-</span>      display: flex;
+
+    </div>      flex-direction: column;
+
+    <div class="pulsar-property">      justify-content: center;
+
+      <span class="pulsar-property-name">DM:</span>      align-items: center;
+
+      <span class="pulsar-property-value" id="pulsar-dm">-</span>      z-index: 1000;
+
+    </div>      transition: opacity 0.6s ease-out;
+
+        }
+
+    <!-- Video display section -->
+
+    <div id="pulsar-video-section">    #loading span {
+
+      <h4>Real Pulsar Animation</h4>      font-size: 24px;
+
+      <div id="video-container">      letter-spacing: 2px;
+
+        <video id="pulsar-display-video" width="260" height="195" loop muted>      margin-bottom: 15px;
+
+          <source src="assets/media/PulsarWithProfile.480p.mp4" type="video/mp4">    }
+
+          Your browser does not support the video tag.
+
+        </video>    #progress-container {
+
+      </div>      width: 60%;
+
+      <div class="pulsar-property">      max-width: 300px;
+
+        <span class="pulsar-property-name">Video Speed:</span>      height: 6px;
+
+        <span class="pulsar-property-value" id="video-speed">1.0x</span>      background-color: rgba(255, 255, 255, 0.1);
+
+      </div>      border-radius: 3px;
+
+    </div>      overflow: hidden;
+
+  </div>    }
+
+
+
+  <div id="controls">    #progress {
+
+    <button id="view-all-btn">View All (4,342)</button>      height: 100%;
+
+    <button id="fast-pulsars-btn">Fast Pulsars (966)</button>      width: 0%;
+
+    <button id="slow-pulsars-btn">Slow Pulsars (1,169)</button>      background: linear-gradient(90deg, #00a2ff, #00ffea);
+
+    <button id="deselect-btn">Deselect Pulsar</button>      transition: width 0.3s ease;
+
+  </div>      border-radius: 3px;
+
     }
 
-    #info {
-      font-size: 14px;
-      padding: 10px 18px;
-      background-color: rgba(25, 30, 50, 0.35);
-      border-radius: 10px;
-      display: inline-block;
-      text-shadow: 0 0 5px rgba(0, 128, 255, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      transition: all 0.3s ease;
-      box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.05);
-    }
+  <div id="stats">
 
-    #loading {
-      position: fixed;
-      width: 100%;
-      height: 100%;
-      background: #000;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      z-index: 1000;
-      transition: opacity 0.6s ease-out;
-    }
+    <div>Visible: <span id="visible-count">0</span></div>    #pulsar-details {
 
-    #loading span {
-      font-size: 24px;
-      letter-spacing: 2px;
-      margin-bottom: 15px;
-    }
+    <div>Selected: <span id="selected-pulsar">None</span></div>      position: absolute;
 
-    #progress-container {
-      width: 60%;
-      max-width: 300px;
-      height: 6px;
-      background-color: rgba(255, 255, 255, 0.1);
-      border-radius: 3px;
-      overflow: hidden;
-    }
+  </div>      top: 80px;
 
-    #progress {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #00a2ff, #00ffea);
-      transition: width 0.3s ease;
-      border-radius: 3px;
-    }
-
-    #pulsar-details {
-      position: absolute;
-      top: 80px;
       right: 20px;
-      width: 300px;
-      background-color: rgba(25, 30, 50, 0.6);
-      border-radius: 10px;
-      padding: 15px;
-      z-index: 100;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      transform: translateX(350px);
-      transition: transform 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.0);
-      max-height: 80vh;
-      overflow-y: auto;
-    }
 
+  <canvas id="webglCanvas"></canvas>      width: 300px;
+
+      background-color: rgba(25, 30, 50, 0.6);
+
+  <script type="importmap">      border-radius: 10px;
+
+  {      padding: 15px;
+
+    "imports": {      z-index: 100;
+
+      "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",      border: 1px solid rgba(255, 255, 255, 0.15);
+
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"      backdrop-filter: blur(10px);
+
+    }      -webkit-backdrop-filter: blur(10px);
+
+  }      transform: translateX(350px);
+
+  </script>      transition: transform 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.0);
+
+      max-height: 80vh;
+
+  <script type="module" src="assets/js/app.js"></script>      overflow-y: auto;
+
+</body>    }
+
+</html>
     #pulsar-details.visible {
       transform: translateX(0);
     }

@@ -52,19 +52,21 @@ An interactive 3D visualization of pulsars in our galaxy with real astronomical 
 
 3. **Open in browser**:
    ```
-   http://localhost:8000/pulsar_with_sound.html
+   http://localhost:8000/
    ```
 
 ## 📁 Project Structure
 
 ```
 pulsar-galaxy-explorer/
-├── pulsar_with_sound.html      # Main visualization (open this file)
-├── processed_pulsar_data.js    # Astronomical data (4,342 pulsars)
-├── PulsarWithProfile.480p.mp4  # Real pulsar emission video
-├── process_csv.js              # Data processing script
-├── data_short.csv              # Raw pulsar catalog data
-└── README.md                   # This file
+├── index.html                  # Entry point
+├── assets/
+│   ├── css/                    # Stylesheets
+│   ├── js/                     # Application logic
+│   ├── data/                   # Astronomical data
+│   └── media/                  # Videos and images
+├── scripts/                    # Data processing scripts
+└── README.md                   # Documentation
 ```
 
 ## 🎮 How to Use
