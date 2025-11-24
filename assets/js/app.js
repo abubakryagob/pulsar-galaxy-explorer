@@ -576,13 +576,15 @@
       detailsPanel.classList.add('visible');
       
       document.getElementById('pulsar-name').textContent = pulsar.userData.name || 'Unknown';
-      document.getElementById('pulsar-assoc').textContent = pulsar.userData.association || '-';
       document.getElementById('pulsar-period').textContent = `${pulsar.userData.period.toFixed(6)}s`;
       document.getElementById('pulsar-frequency').textContent = `${(1/pulsar.userData.period).toFixed(3)} Hz`;
       document.getElementById('pulsar-distance').textContent = `${pulsar.userData.distance.toFixed(2)} kpc`;
       document.getElementById('pulsar-dm').textContent = `${pulsar.userData.dm.toFixed(2)} pc cm⁻³`;
       
-      document.getElementById('selected-pulsar').textContent = pulsar.userData.name;
+      const gl = pulsar.userData.gl.toFixed(2);
+      const gb = pulsar.userData.gb.toFixed(2);
+      const coordsEl = document.getElementById('pulsar-coords');
+      if (coordsEl) coordsEl.textContent = `L: ${gl}°, B: ${gb}°`;
       
       // Play sound
       playPulsarSound(pulsar.userData);
@@ -612,7 +614,8 @@
       });
       
       visiblePulsars = pulsars.filter(p => p.visible);
-      document.getElementById('visible-count').textContent = visiblePulsars.length;
+      const countEl = document.getElementById('visible-count');
+      if (countEl) countEl.textContent = visiblePulsars.length;
     }
 
     // Mouse interaction
@@ -628,6 +631,8 @@
       
       if (intersects.length > 0) {
         selectPulsar(intersects[0].object);
+      } else {
+        deselectCurrentPulsar();
       }
     }
 
@@ -672,11 +677,11 @@
       camera.position.set(0, 20, 40);
       
       renderer = new THREE.WebGLRenderer({
-        canvas: document.getElementById('webglCanvas'),
         antialias: true
       });
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      document.body.appendChild(renderer.domElement);
       
       controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
@@ -704,44 +709,60 @@
       window.addEventListener('resize', onWindowResize, false);
       
       // UI event listeners
-      document.getElementById('view-all-btn').addEventListener('click', () => filterPulsars('all'));
-      document.getElementById('fast-pulsars-btn').addEventListener('click', () => filterPulsars('fast'));
-      document.getElementById('slow-pulsars-btn').addEventListener('click', () => filterPulsars('slow'));
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          // Remove active class from all
+          document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+          // Add to clicked
+          e.target.classList.add('active');
+          // Filter
+          filterPulsars(e.target.dataset.filter);
+        });
+      });
       
-      document.getElementById('deselect-btn').addEventListener('click', () => {
-        if (selectedPulsar) {
-          selectedPulsar.scale.setScalar(selectedPulsar.userData.originalScale);
-          selectedPulsar.material.opacity = 0.9;
-          removePulsarEffects();
-          selectedPulsar = null;
+      const closeVideoBtn = document.getElementById('close-video');
+      if (closeVideoBtn) {
+        closeVideoBtn.addEventListener('click', () => {
+          deselectCurrentPulsar();
+        });
+      }
+      
+      const muteBtn = document.getElementById('mute-btn');
+      if (muteBtn) {
+        muteBtn.addEventListener('click', () => {
+          audioEnabled = !audioEnabled;
+          muteBtn.textContent = audioEnabled ? '🔊 Mute Audio' : '🔇 Unmute Audio';
           
-          // Reset and hide video
-          if (pulsarVideo) {
-            pulsarVideo.playbackRate = 1.0;
-            pulsarVideo.pause();
-            const videoElement = document.getElementById('pulsar-video');
-            if (videoElement) {
-              videoElement.style.display = 'none';
+          if (audioEnabled) {
+            if (audioContext && audioContext.state === 'suspended') {
+              audioContext.resume();
             }
+            if (selectedPulsar) playPulsarSound(selectedPulsar.userData);
+          } else {
+            stopPulsarSound();
           }
-          
-          document.getElementById('pulsar-details').classList.remove('visible');
-          document.getElementById('selected-pulsar').textContent = 'None';
-          stopPulsarSound();
+        });
+      }
+    }
+
+    function deselectCurrentPulsar() {
+      if (selectedPulsar) {
+        selectedPulsar.scale.setScalar(selectedPulsar.userData.originalScale);
+        selectedPulsar.material.opacity = 0.9;
+        removePulsarEffects();
+        selectedPulsar = null;
+        
+        // Reset and hide video
+        if (pulsarVideo) {
+          pulsarVideo.playbackRate = 1.0;
+          pulsarVideo.pause();
+          pulsarVideo.style.display = 'none';
         }
-      });
-      
-      document.getElementById('audio-toggle').addEventListener('click', () => {
-        audioEnabled = !audioEnabled;
-        document.getElementById('audio-toggle').textContent = audioEnabled ? '🔊' : '🔇';
-        if (!audioEnabled) stopPulsarSound();
-      });
-      
-      document.getElementById('volume-slider').addEventListener('input', (e) => {
-        if (audioGain) {
-          audioGain.gain.value = e.target.value / 100;
-        }
-      });
+        
+        document.getElementById('pulsar-details').classList.remove('visible');
+        // document.getElementById('selected-pulsar').textContent = 'None'; // Element might not exist
+        stopPulsarSound();
+      }
     }
 
     // Window resize handler
