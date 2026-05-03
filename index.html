@@ -56,6 +56,7 @@
       <input type="checkbox" id="researcher-mode">
       <span class="mode-label">Researcher</span>
     </label>
+    <button class="icon-btn" id="tours-btn" title="Cinematic Tours">🎬</button>
     <button class="icon-btn" id="audio-toggle" title="Toggle audio">🔇</button>
   </div>
 </header>
@@ -178,6 +179,43 @@
     </table>
     <a class="atnf-link" id="atnf-link" href="#" target="_blank" rel="noopener">View in ATNF Catalogue →</a>
     <button class="audio-play-btn" id="play-audio-btn-r">▶ Play Frequency</button>
+  </div>
+</div>
+
+<!-- ── Tour Selector Overlay ──────────────────────────────── -->
+<div id="tour-overlay" class="hidden">
+  <div class="tour-overlay-inner">
+    <div class="tour-overlay-header">
+      <h2>Cinematic Tours</h2>
+      <p>Four scripted journeys through the neutron star universe</p>
+      <button class="tour-close-btn" id="tour-overlay-close">✕</button>
+    </div>
+    <div class="tour-cards" id="tour-cards">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- ── Cinematic HUD (active during tour) ────────────────── -->
+<div id="tour-hud" class="hidden">
+  <div class="tour-hud-inner">
+    <div class="tour-hud-top">
+      <span class="tour-hud-title" id="tour-hud-title"></span>
+      <div class="tour-hud-controls">
+        <button class="tour-ctrl-btn" id="tour-prev-btn" title="Previous">⏮</button>
+        <button class="tour-ctrl-btn" id="tour-pause-btn" title="Pause">⏸</button>
+        <button class="tour-ctrl-btn" id="tour-next-btn" title="Next step">⏭</button>
+        <button class="tour-ctrl-btn tour-stop-btn" id="tour-stop-btn" title="End tour">✕</button>
+      </div>
+    </div>
+    <div class="tour-narration">
+      <p class="tour-narration-main" id="tour-narration-main"></p>
+      <p class="tour-narration-sub"  id="tour-narration-sub"></p>
+    </div>
+    <div class="tour-progress-track">
+      <div class="tour-progress-bar" id="tour-progress-bar"></div>
+    </div>
+    <div class="tour-time-label" id="tour-time-label"></div>
   </div>
 </div>
 

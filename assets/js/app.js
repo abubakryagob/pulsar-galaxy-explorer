@@ -8,6 +8,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { PPdotDiagram } from './ppdot.js';
+import { TourEngine, TOUR_DEFS } from './tours.js';
 
 // ── Class definitions ─────────────────────────────────────────────────────────
 const CLASS_DEF = {
@@ -49,6 +50,10 @@ let animT = 0;
 let ppdotDiagram = null;
 let ppdotActive = false;
 let ppdotCrosslinkedStar = null;
+
+// Tour engine
+let tourEngine = null;
+let tourNarrationTimer = null;
 
 // Camera transition
 let camTarget = { pos: new THREE.Vector3(), lookAt: new THREE.Vector3() };
@@ -434,8 +439,11 @@ function animate() {
     }
   }
 
-  // Camera transition
-  if (camTransitioning) {
+  // Tour engine takes full camera control when active
+  if (tourEngine && tourEngine.active) {
+    tourEngine.tick(delta);
+  } else if (camTransitioning) {
+    // Camera transition (flyTo)
     camTransitionT += delta / camTransitionDuration;
     const t = easeInOutCubic(Math.min(camTransitionT, 1));
     camera.position.lerpVectors(camFromPos, camToPos, t);
@@ -885,6 +893,156 @@ function setupUI() {
 
   // Reset filters
   document.getElementById('reset-filters').addEventListener('click', resetFilters);
+
+  // Tours
+  setupTours();
+}
+
+// ── Cinematic Tours ───────────────────────────────────────────────────────────
+function setupTours() {
+  // Build tour cards
+  const container = document.getElementById('tour-cards');
+  if (!container) return;
+  TOUR_DEFS.forEach(def => {
+    const mins = Math.floor(def.duration / 60);
+    const secs = def.duration % 60;
+    const durLabel = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+    const card = document.createElement('div');
+    card.className = 'tour-card';
+    card.style.setProperty('--tour-color', def.color);
+    card.innerHTML = `
+      <div class="tour-card-icon">${def.icon}</div>
+      <div class="tour-card-name">${def.name}</div>
+      <div class="tour-card-tagline">${def.tagline}</div>
+      <p class="tour-card-desc">${def.description}</p>
+      <div class="tour-card-footer">
+        <span class="tour-card-duration">~${durLabel}</span>
+        <button class="tour-start-btn" style="background:${def.color}">Begin Tour</button>
+      </div>`;
+
+    card.querySelector('.tour-start-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      closeTourOverlay();
+      if (webglOk) startTour(def.id);
+    });
+    container.appendChild(card);
+  });
+
+  // Open / close tour overlay
+  document.getElementById('tours-btn').addEventListener('click', () => {
+    document.getElementById('tour-overlay').classList.remove('hidden');
+  });
+  document.getElementById('tour-overlay-close').addEventListener('click', closeTourOverlay);
+  document.getElementById('tour-overlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('tour-overlay')) closeTourOverlay();
+  });
+
+  // HUD controls
+  document.getElementById('tour-stop-btn').addEventListener('click', stopTour);
+  document.getElementById('tour-pause-btn').addEventListener('click', () => {
+    if (!tourEngine) return;
+    if (tourEngine.paused) {
+      tourEngine.resume();
+      document.getElementById('tour-pause-btn').textContent = '⏸';
+    } else {
+      tourEngine.pause();
+      document.getElementById('tour-pause-btn').textContent = '▶';
+    }
+  });
+  document.getElementById('tour-next-btn').addEventListener('click', () => {
+    if (tourEngine) tourEngine.skip();
+  });
+  document.getElementById('tour-prev-btn').addEventListener('click', () => {
+    // Restart current tour from beginning
+    if (tourEngine && tourEngine._tour) startTour(tourEngine._tour.id);
+  });
+}
+
+function closeTourOverlay() {
+  document.getElementById('tour-overlay').classList.add('hidden');
+}
+
+function startTour(tourId) {
+  if (!webglOk) return;
+  if (!tourEngine) {
+    tourEngine = new TourEngine(camera, controls);
+  }
+
+  // Ensure we're in galaxy 3D view
+  if (ppdotActive) deactivatePpdot();
+  document.querySelectorAll('.view-tab').forEach(b => b.classList.remove('active'));
+  document.querySelector('.view-tab[data-view="galaxy"]').classList.add('active');
+
+  // Hide sidebar for immersion
+  document.getElementById('sidebar').classList.add('tour-hidden');
+  // Hide detail panel
+  deselectStar();
+  // Position tour HUD left edge at 0 (no sidebar during tour)
+  document.getElementById('tour-hud').style.left = '0';
+
+  const hud = document.getElementById('tour-hud');
+  hud.classList.remove('hidden');
+  hud.classList.add('tour-active');
+
+  const def = TOUR_DEFS.find(t => t.id === tourId);
+  document.getElementById('tour-hud-title').textContent = `${def.icon}  ${def.name}`;
+  document.getElementById('tour-hud-title').style.color = def.color;
+  document.getElementById('tour-pause-btn').textContent = '⏸';
+
+  tourEngine.start(tourId, starIndexMap, {
+    onNarration: (main, sub) => {
+      setTourNarration(main, sub);
+    },
+    onProgress: (pct, t) => {
+      document.getElementById('tour-progress-bar').style.width = (pct * 100).toFixed(1) + '%';
+      const rem = Math.ceil(def.duration - t);
+      document.getElementById('tour-time-label').textContent =
+        `${Math.floor(rem / 60)}:${String(rem % 60).padStart(2, '0')} remaining`;
+    },
+    onComplete: () => {
+      endTourHud();
+    },
+    selectStar: (star) => {
+      if (selectedStar) restoreStarSize(selectedStar);
+      selectedStar = star;
+      showDetailPanel(star);
+      if (audioEnabled) playClickTone(star.audio_freq);
+    },
+    deselectStar: () => {
+      deselectStar();
+    },
+  });
+}
+
+function stopTour() {
+  if (tourEngine) tourEngine.stop();
+  endTourHud();
+}
+
+function endTourHud() {
+  const hud = document.getElementById('tour-hud');
+  hud.classList.add('hidden');
+  hud.classList.remove('tour-active');
+  hud.style.left = '';
+  document.getElementById('sidebar').classList.remove('tour-hidden');
+  document.getElementById('tour-progress-bar').style.width = '0%';
+}
+
+function setTourNarration(main, sub) {
+  const mainEl = document.getElementById('tour-narration-main');
+  const subEl  = document.getElementById('tour-narration-sub');
+
+  clearTimeout(tourNarrationTimer);
+  mainEl.classList.add('fade');
+  subEl.classList.add('fade');
+
+  tourNarrationTimer = setTimeout(() => {
+    mainEl.textContent = main;
+    subEl.textContent  = sub;
+    mainEl.classList.remove('fade');
+    subEl.classList.remove('fade');
+  }, 400);
 }
 
 function buildClassFilters(counts) {

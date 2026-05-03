@@ -85,7 +85,22 @@ npm run ingest
 npm start
 ```
 
+### Phase 3 (complete) — Cinematic Tours (`assets/js/tours.js`)
+- `TourEngine` class: camera-driven cinematic scripting via timestamped steps
+- 4 tours, each with fly-to waypoints, narration text, and optional star highlights:
+  - **The First Pulsar** (~78 s) — journey to CP 1919 / J1921+2153
+  - **Fastest Spinner** (~76 s) — J1748-2446ad, 716 Hz MSP
+  - **Magnetar Mayhem** (~80 s) — J1808-2024 and J1818-1607
+  - **The Graveyard** (~82 s) — J1548-4821, oldest pulsar at 20 Gyr
+- Tour selector overlay (🎬 button) with color-coded cards, taglines, duration
+- Cinematic HUD: narration bar, crossfade text, progress bar, time remaining
+- HUD controls: pause/resume, skip step, restart tour, stop tour
+- Sidebar hides during tours for full-screen immersion
+- Tour engine integrated into Three.js `animate()` loop — takes exclusive camera control when active
+- Stars are selected/highlighted automatically during tours; audio plays on each selection
+- WebGL guard: tour start blocked gracefully when WebGL is unavailable
+
 ## Phase Roadmap
 - **Phase 1 ✓**: Backend + API + classified rendering + filters + detail panel + audio
 - **Phase 2 ✓**: P-Ṗ diagram with isochrones, death line, zoom/pan, cross-linking
-- **Phase 3**: Cinematic tour mode (4 tours: First Pulsar, Fastest Spinner, Magnetar Mayhem, The Graveyard)
+- **Phase 3 ✓**: Cinematic tour mode (4 tours: First Pulsar, Fastest Spinner, Magnetar Mayhem, The Graveyard)
