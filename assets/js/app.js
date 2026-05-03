@@ -7,6 +7,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { PPdotDiagram } from './ppdot.js';
 
 // ── Class definitions ─────────────────────────────────────────────────────────
 const CLASS_DEF = {
@@ -44,6 +45,11 @@ let selectedStar = null;
 let hoveredInfo = null;
 let animT = 0;
 
+// P-Ṗ diagram
+let ppdotDiagram = null;
+let ppdotActive = false;
+let ppdotCrosslinkedStar = null;
+
 // Camera transition
 let camTarget = { pos: new THREE.Vector3(), lookAt: new THREE.Vector3() };
 let camTransitioning = false;
@@ -79,10 +85,27 @@ let researcherMode = false;
 const dummy = new THREE.Object3D();
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-async function init() {
-  setProgress(5, 'Starting Three.js scene...');
-  setupScene();
+let webglOk = false;
 
+async function init() {
+  // Step 1: try WebGL — non-fatal if it fails (P-Ṗ diagram works without it)
+  setProgress(5, 'Starting Three.js scene...');
+  try {
+    setupScene();
+    webglOk = true;
+  } catch (err) {
+    console.warn('WebGL unavailable — 3D view disabled, P-Ṗ diagram still works.', err.message);
+    // Hide 3D canvas, show placeholder message
+    const cw = document.getElementById('canvas-wrap');
+    if (cw) {
+      cw.style.display = 'flex';
+      cw.style.alignItems = 'center';
+      cw.style.justifyContent = 'center';
+      cw.innerHTML = '<div style="color:#4466aa;font-size:14px;text-align:center;padding:40px">3D view requires WebGL.<br>Use the <strong>P-Ṗ Diagram</strong> tab above.</div>';
+    }
+  }
+
+  // Step 2: always load data from API
   setProgress(15, 'Fetching pulsar catalogue...');
   try {
     await loadData();
@@ -92,20 +115,25 @@ async function init() {
     return;
   }
 
-  setProgress(85, 'Building galaxy...');
-  buildGalaxySurround();
+  // Step 3: 3D-specific setup only if WebGL worked
+  if (webglOk) {
+    setProgress(85, 'Building galaxy...');
+    buildGalaxySurround();
+    setProgress(92, 'Finalizing rendering...');
+    setupPostProcessing();
+  }
 
-  setProgress(92, 'Finalizing rendering...');
-  setupPostProcessing();
   setupUI();
   setupEventListeners();
-  applyFilters();
+  if (webglOk) applyFilters();
 
   setProgress(100, 'Ready!');
   setTimeout(fadeOutLoading, 600);
 
-  clock = new THREE.Clock();
-  animate();
+  if (webglOk) {
+    clock = new THREE.Clock();
+    animate();
+  }
 }
 
 // ── Scene setup ───────────────────────────────────────────────────────────────
@@ -514,6 +542,15 @@ function setupEventListeners() {
   const canvas = document.getElementById('three-canvas');
   let mouseDownPos = { x: 0, y: 0 };
 
+  // Guard: 3D canvas interactions only available when WebGL works
+  if (!webglOk || !canvas) {
+    window.addEventListener('resize', onResize);
+    document.getElementById('close-panel').addEventListener('click', deselectStar);
+    setupSearch();
+    setupSliders();
+    return;
+  }
+
   canvas.addEventListener('mousedown', e => {
     mouseDownPos = { x: e.clientX, y: e.clientY };
   });
@@ -573,6 +610,8 @@ function selectStar(star) {
   showDetailPanel(star);
   stopHoverTone();
   if (audioEnabled) playClickTone(star.audio_freq);
+  // Cross-link: highlight on P-Ṗ diagram if open
+  if (ppdotDiagram) ppdotDiagram.highlight(star.jname);
 }
 
 function deselectStar() {
@@ -581,6 +620,7 @@ function deselectStar() {
     selectedStar = null;
   }
   document.getElementById('detail-panel').classList.remove('open');
+  document.getElementById('ppdot-wrap').classList.remove('panel-open');
   stopClickTone();
 }
 
@@ -641,6 +681,11 @@ function setViewMode(mode) {
 async function showDetailPanel(star) {
   const panel = document.getElementById('detail-panel');
   panel.classList.add('open');
+  // Shrink P-Ṗ canvas if it's the active view
+  if (ppdotActive) {
+    document.getElementById('ppdot-wrap').classList.add('panel-open');
+    setTimeout(resizePpdotCanvas, 320); // after CSS transition
+  }
 
   // Basic info from cache
   const cls = star._cls;
@@ -779,7 +824,13 @@ function setupUI() {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.view-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      setViewMode(btn.dataset.view);
+      const view = btn.dataset.view;
+      if (view === 'ppdot') {
+        activatePpdot();
+      } else {
+        deactivatePpdot();
+        setViewMode(view);
+      }
     });
   });
 
@@ -1025,8 +1076,84 @@ function stopHoverTone() {
   }
 }
 
+// ── P-Ṗ Diagram init & view toggle ───────────────────────────────────────────
+function activatePpdot() {
+  ppdotActive = true;
+  const wrap = document.getElementById('ppdot-wrap');
+  const canvasWrap = document.getElementById('canvas-wrap');
+  wrap.classList.remove('hidden');
+  canvasWrap.classList.add('hidden');
+
+  const canvas = document.getElementById('ppdot-canvas');
+  const rect = wrap.getBoundingClientRect();
+  canvas.width  = Math.floor(rect.width  || wrap.clientWidth);
+  canvas.height = Math.floor(rect.height || wrap.clientHeight);
+
+  if (!ppdotDiagram) {
+    ppdotDiagram = new PPdotDiagram(canvas, {
+      onClickStar: (star) => {
+        ppdotCrosslinkedStar = star;
+        const banner = document.getElementById('ppdot-crosslink-banner');
+        document.getElementById('ppdot-crosslink-name').textContent = star.jname;
+        banner.classList.remove('hidden');
+        // Also open detail panel for this star
+        const cached = starIndexMap.get(star.jname);
+        if (cached) {
+          showDetailPanel(cached);
+          document.getElementById('ppdot-wrap').classList.add('panel-open');
+          resizePpdotCanvas();
+        }
+      },
+    });
+    ppdotDiagram.setData(allStars.filter(s => s.p0 && s.p1));
+  } else {
+    resizePpdotCanvas();
+    ppdotDiagram.render();
+  }
+
+  // Re-highlight if a star was previously selected
+  if (selectedStar) ppdotDiagram.highlight(selectedStar.jname);
+
+  // "View in Galaxy" cross-link button
+  document.getElementById('ppdot-goto-3d').onclick = () => {
+    if (!ppdotCrosslinkedStar) return;
+    const cached = starIndexMap.get(ppdotCrosslinkedStar.jname);
+    // Switch to galaxy tab
+    document.querySelectorAll('.view-tab').forEach(b => b.classList.remove('active'));
+    document.querySelector('.view-tab[data-view="galaxy"]').classList.add('active');
+    deactivatePpdot();
+    setViewMode('galaxy');
+    if (cached) {
+      setTimeout(() => { flyTo(cached); selectStar(cached); }, 400);
+    }
+  };
+}
+
+function deactivatePpdot() {
+  ppdotActive = false;
+  document.getElementById('ppdot-wrap').classList.add('hidden');
+  document.getElementById('canvas-wrap').classList.remove('hidden');
+}
+
+function resizePpdotCanvas() {
+  if (!ppdotDiagram) return;
+  const wrap = document.getElementById('ppdot-wrap');
+  const canvas = document.getElementById('ppdot-canvas');
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width  = w;
+    canvas.height = h;
+  }
+  ppdotDiagram.render();
+}
+
 // ── Resize ────────────────────────────────────────────────────────────────────
 function onResize() {
+  if (ppdotActive) {
+    resizePpdotCanvas();
+    return;
+  }
   const wrap = document.getElementById('canvas-wrap');
   const w = wrap.clientWidth, h = wrap.clientHeight;
   camera.aspect = w / h;

@@ -51,11 +51,26 @@ Interactive 3D visualization of 4,355 real pulsars and neutron stars from the AT
 - Sun ☉ and Galactic Centre markers with labels
 - Bloom post-processing (UnrealBloomPass)
 
-## UI Features (Phase 1)
+## UI Features
+
+### Phase 1 (complete)
 - Left sidebar: class checkboxes with counts, period/distance/B-field sliders, text search, random object
 - Right panel: public view (accessible language) + researcher view (numerical data)
-- Top bar: 3 view modes (Galaxy 3D / Top-Down / Edge-On), Researcher mode toggle, audio
+- Top bar: Galaxy 3D / Top-Down / Edge-On / P-Ṗ Diagram tabs, Researcher mode toggle, audio
 - Audio engine: hover tick, click tone at pulsar audio frequency (Web Audio API)
+- WebGL graceful fallback: P-Ṗ tab accessible even without GPU
+
+### Phase 2 (complete) — P-Ṗ Diagram (`assets/js/ppdot.js`)
+- Pure Canvas 2D — no extra libraries, no WebGL requirement
+- 2,804 pulsars with known P0 and Ṗ plotted
+- B-field isochrones (slope −1): 10⁸, 10¹⁰, 10¹², 10¹⁴ G with labels
+- Characteristic age isochrones (slope +1): 10³–10¹¹ yr with labels
+- Ṗdot (Ėdot) isochrones (slope +3): 10²⁸–10³⁸ erg/s
+- Death line (slope −2) with "Pulsar Graveyard" shading
+- Scroll-to-zoom, drag-to-pan, double-click to reset
+- Hover tooltip: name, class, P₀, Ṗ, B-field, characteristic age
+- Cross-link: clicking a point opens detail panel + "View in Galaxy →" button flies 3D camera to that star
+- Cross-link reverse: selecting a star in 3D view highlights it on P-Ṗ diagram
 
 ## Running
 
@@ -72,5 +87,5 @@ npm start
 
 ## Phase Roadmap
 - **Phase 1 ✓**: Backend + API + classified rendering + filters + detail panel + audio
-- **Phase 2**: P-Pdot diagram (D3.js canvas, with death line, B-field/age isochrones)
+- **Phase 2 ✓**: P-Ṗ diagram with isochrones, death line, zoom/pan, cross-linking
 - **Phase 3**: Cinematic tour mode (4 tours: First Pulsar, Fastest Spinner, Magnetar Mayhem, The Graveyard)

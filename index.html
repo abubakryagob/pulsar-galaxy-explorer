@@ -48,6 +48,7 @@
     <button class="view-tab active" data-view="galaxy">Galaxy 3D</button>
     <button class="view-tab" data-view="topdown">Top-Down</button>
     <button class="view-tab" data-view="edgeon">Edge-On</button>
+    <button class="view-tab ppdot-tab" data-view="ppdot">P-Ṗ Diagram</button>
   </nav>
 
   <div class="topbar-right">
@@ -177,6 +178,16 @@
     </table>
     <a class="atnf-link" id="atnf-link" href="#" target="_blank" rel="noopener">View in ATNF Catalogue →</a>
     <button class="audio-play-btn" id="play-audio-btn-r">▶ Play Frequency</button>
+  </div>
+</div>
+
+<!-- P-Ṗ Diagram overlay (shown when ppdot tab active) -->
+<div id="ppdot-wrap" class="hidden">
+  <canvas id="ppdot-canvas"></canvas>
+  <div class="ppdot-hint">Scroll to zoom · Drag to pan · Double-click to reset · Click a point to cross-link to 3D view</div>
+  <div id="ppdot-crosslink-banner" class="ppdot-crosslink hidden">
+    <span id="ppdot-crosslink-name"></span>
+    <button id="ppdot-goto-3d">View in Galaxy →</button>
   </div>
 </div>
 
