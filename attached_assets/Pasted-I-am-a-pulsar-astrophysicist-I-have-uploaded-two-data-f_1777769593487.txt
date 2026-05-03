@@ -1,0 +1,293 @@
+I am a pulsar astrophysicist. I have uploaded two data files to this project:
+- atnf_raw.csv  (ATNF Pulsar Catalogue v2.7.0, ~3,400 objects, CSV format)
+- magnetars_raw.txt (McGill Magnetar Catalogue, ~30 objects)
+
+Build a complete backend + frontend system for the Pulsar Galaxy Explorer.
+
+== BACKEND: DATA PIPELINE (Node.js + Express + SQLite) ==
+
+Create scripts/ingest.js — a one-time data ingestion script:
+
+1. Parse atnf_raw.csv using the 'csv-parse' npm package
+2. Parse magnetars_raw.txt (tab or space separated, handle manually)
+3. Classify each object into one of these classes using this logic:
+
+   MAGNETAR:        Type contains 'AXP' or 'SGR', OR name matches McGill list
+   RECYCLED_MSP:    P0 < 0.03s AND Binary parameter is not null
+   FAST_MSP:        P0 < 0.03s AND Binary is null
+   RRAT:            Type contains 'RRAT'
+   ISOLATED_NS:     Type contains 'XINS'
+   CCO:             Assoc contains 'SNR' AND no S1400 flux AND no P1
+   BINARY_PULSAR:   Binary is not null AND P0 >= 0.03s
+   CANONICAL:       everything else
+
+4. For each object, compute if not already present:
+   - BSurf = 3.2e19 * sqrt(P0 * P1)  [Gauss]  (skip if P1 is null)
+   - Age = P0 / (2 * P1)  [years]  (skip if P1 is null)
+   - Edot = 4 * pi^2 * I * P1 / P0^3  where I=1e45 g/cm2  [erg/s]
+   - audio_freq: map P0 to audio range 40-2000 Hz using:
+     freq = 440 / P0  (cap at 2000, floor at 40)
+   - is_msp: boolean, true if P0 < 0.03
+   - has_binary: boolean
+
+5. Store everything in SQLite table 'neutron_stars' with columns:
+   id, jname, bname, ra, dec, gl, gb, 
+   x_kpc, y_kpc, z_kpc, dist_kpc,
+   p0, p1, dm, age_yr, bsurf_g, edot_ergs,
+   s1400, w50, binary_model, assoc, nglitch,
+   ns_class, audio_freq, is_msp, has_binary,
+   discovery_date, source (atnf or mcgill),
+   created_at
+
+6. For magnetars from McGill catalogue, add additional columns:
+   last_outburst_year, outburst_count, spectral_type
+
+Create API endpoints:
+
+GET /api/stars
+  Returns all objects with: id, jname, gl, gb, x_kpc, y_kpc, z_kpc, 
+  ns_class, p0, bsurf_g, is_msp, dist_kpc, audio_freq
+  (lightweight — only what Three.js needs to render)
+  
+GET /api/stars/:jname
+  Returns ALL columns for a single object (full detail panel)
+
+GET /api/stars/class/:class
+  Filter by ns_class
+
+GET /api/stats
+  Returns: count by class, min/max P0, min/max BSurf, 
+  total objects, last updated timestamp
+
+GET /api/ppdot
+  Returns: id, jname, p0, p1, bsurf_g, ns_class, dist_kpc
+  (for P-Pdot diagram — only objects where both P0 and P1 exist)
+
+Also create GET /api/refresh that re-runs the ingestion 
+(so you can update data without restarting the server).
+
+== FRONTEND: THREE.JS VISUALIZATION ==
+
+Build on the existing Three.js setup. Complete overhaul of the 
+rendering and interaction system:
+
+-- VISUAL CLASS SYSTEM --
+Each ns_class gets a distinct visual identity:
+
+CANONICAL:     color #4488ff (blue-white), size 1.0, 
+               slow rotation animation, faint beam cone
+
+RECYCLED_MSP:  color #ffd700 (gold), size 0.7,
+               very fast rotation (map P0 to rotation speed),
+               bright tight pulse glow
+
+FAST_MSP:      color #ffaa00 (amber), size 0.6, rapid spin
+
+MAGNETAR:      color #ff2244 (deep red), size 1.8,
+               pulsing red glow (irregular timing),
+               visible magnetic field arc lines around it,
+               occasional flare burst particle effect
+
+RRAT:          color #aa44ff (purple), size 1.2,
+               intermittent visibility (fades in/out randomly)
+
+ISOLATED_NS:   color #ccccdd (ice blue-white), size 0.8,
+               no beam, soft thermal glow
+
+CCO:           color #556677 (dark steel), size 0.9,
+               surrounded by faint expanding SNR shell ring
+
+BINARY_PULSAR: color #00ffcc (cyan-green), size 1.1,
+               show companion dot orbiting it
+
+Use THREE.InstancedMesh for ALL point rendering (one draw call per class).
+Animate instanced meshes using instanceMatrix updates per frame.
+
+-- GALACTIC STRUCTURE --
+Render the Milky Way context:
+1. Galactic plane: faint disc of ~50,000 background star particles
+   (use gaussian distribution, flatten in Z, color temperature gradient
+   from blue-white in center to red in outer arms)
+2. Four spiral arm indicators: faint curved line traces
+   (Perseus, Norma, Sagittarius, Local/Orion arms)
+   Mark where the Sun is (small yellow dot, label "☉ Sun")
+3. Galactic center: orange-red glow, label "Galactic Centre"
+4. Grid lines: faint galactic coordinate grid (30° spacing)
+   Label every 60°
+
+-- CAMERA AND CONTROLS --
+Three view modes (toggle buttons in UI):
+1. GALAXY VIEW: full 3D, orbit controls, 
+   default position (0, 80, 120) looking at galactic center
+2. TOP-DOWN: orthographic projection from above galactic plane,
+   shows spiral structure clearly
+3. EDGE-ON: side view, shows galactic disc thickness and Z distribution
+
+Smooth animated transitions between views (2 second easing).
+
+-- DETAIL PANEL --
+On click of any object, slide in a right panel:
+
+PUBLIC MODE:
+- Name (large) + class badge (color-matched)
+- Hero stat: "Spins [N] times per second" or "Once every [X] seconds"
+- Distance: "[X] light-years — light left when [human event]"
+  (map distance to historical events:
+   100 ly → "when [year] happened"
+   use a lookup: 100=1925, 500=1525, 1000=1025, 2000=25BC, 
+   5000=3000BC, 10000=8000BC)
+- Magnetic field: "[X] times Earth's field" (Earth = 0.5 Gauss)
+- Discovery year if available
+- Plain English "Why this object is special" — 2 sentences
+  (use a template per class, fill in numbers)
+- For magnetars: "Last known outburst: [year]" from McGill data
+- PLAY AUDIO button: generate tone at audio_freq using Web Audio API
+  (sine wave, 3 second duration, fade in/out)
+
+RESEARCHER MODE (toggle switch):
+- P0 in ms (4 decimal places)
+- P1 (scientific notation)
+- DM (cm⁻³ pc)
+- BSurf (log10 in Gauss)
+- Characteristic age (yr, scientific notation)
+- Edot (erg/s, scientific notation)
+- Distance method note (DM-based YMW16)
+- Number of glitches (NGlt)
+- Binary companion type if applicable
+- Direct link: "View in ATNF Catalogue →" 
+  href: https://www.atnf.csiro.au/research/pulsar/psrcat/proc_form.php?Type=normal&Name=[jname]
+
+-- FILTER AND SEARCH --
+Left sidebar panel (collapsible on mobile):
+- Class toggles: checkbox per class, color-coded, 
+  show count per class e.g. "● Canonical (2,891)"
+- Sliders:
+  * Period range: 0.001s to 10s (log scale)
+  * Distance range: 0 to 30 kpc
+  * Magnetic field: 10^8 to 10^15 Gauss (log scale)
+- Text search: search by name (J or B name), 
+  highlight matching object and fly camera to it
+- "Reset Filters" button
+- "Random Object" button — fly to a random object and open its panel
+
+-- AUDIO ENGINE --
+When hovering a pulsar: subtle high-pitched tick at its audio_freq 
+(very quiet, 0.1 volume, only if audio is enabled)
+When clicking and opening panel: louder 3-second tone
+Toggle: 🔊 / 🔇 in header
+
+Master audio enable/disable (default OFF — don't autoplay)
+
+== P-PDOT DIAGRAM VIEW ==
+Separate view mode, toggled from main nav:
+
+- Scatter plot using D3.js or canvas (not Three.js)
+- X axis: log10(P0) from -3 to 1.5
+- Y axis: log10(P1) from -22 to -9
+- Each point colored by ns_class (same scheme)
+- Point size proportional to Edot
+- Constant B-field lines: dashed lines for 
+  B = 10^8, 10^10, 10^12, 10^14 Gauss
+  label each line
+- Constant age lines: dashed for 
+  10^3, 10^5, 10^7, 10^9, 10^11 yr
+  label each
+- Death line: P1 = 1.7e-16 * P^(-2) — draw as solid red line,
+  shade below it grey ("Pulsar Graveyard" label)
+- Light cylinder line if space allows
+- Hover: tooltip with name, class, P0, P1, BSurf, Age
+- Click: highlight in 3D galaxy view too (cross-link both views)
+- MSP island should be clearly visible bottom-left
+- Magnetar island clearly visible top-right
+
+== STORYTELLING / TOUR MODE ==
+Cinematic guided tours. Add a "Tours" button in header.
+
+Tour 1 — "The First Pulsar" (3 min)
+Step 1: Fade in black. Text overlay: "November 1967. Cambridge, England."
+Step 2: Camera flies from far away down to PSR B1919+21 location
+Step 3: Zoom in, show its detail panel opening automatically
+Step 4: Show image overlay of original chart recording (use a 
+        placeholder image or ASCII art recreation if no image available)
+Step 5: Text: "Jocelyn Bell noticed something repeating every 1.337 seconds.
+         It was so regular, astronomers briefly called it LGM-1. 
+         Little Green Men."
+Step 6: Play audio tone at 0.748 Hz (mapped to audible)
+Step 7: Pan out to show the galaxy — highlight all known pulsars discovered 
+        since 1967 appearing one by one (accelerated, 1 per 100ms)
+
+Tour 2 — "The Fastest Spinner" (2 min)
+Fly to PSR J1748-2446ad. Show: 716 rotations per second.
+Text: "This object spins faster than a kitchen blender on maximum. 
+At its equator, the surface moves at ~24% the speed of light."
+Play audio at 716 Hz (audible A note approximately).
+Show its position in P-Pdot diagram.
+
+Tour 3 — "Magnetar Mayhem — December 27, 2004" (3 min)
+Fly to SGR 1806-20. Deep red glow intensifies.
+Text: "At 21:30 UTC on December 27, 2004, this object 
+released more energy in 0.2 seconds than the Sun emits in 250,000 years."
+Simulate flare: particle burst explosion effect from the magnetar.
+Text: "It briefly outshone the full Moon in gamma rays.
+It ionized Earth's upper atmosphere from 50,000 light-years away."
+Show B-field: 10^15 Gauss. Comparison: Earth = 0.5 Gauss.
+
+Tour 4 — "The Graveyard" (2 min)
+Switch to P-Pdot view. Camera zooms to the death line.
+Highlight pulsars near the death line. 
+Text: "As a pulsar ages, it spins down. Its period grows. 
+Eventually it crosses the death line — too slow to emit radio waves.
+It becomes invisible. A cold dark remnant. 
+We call this the pulsar graveyard."
+Grey out pulsars one by one below the death line dramatically.
+
+Each tour: 
+- Progress bar at bottom
+- Pause / Resume / Skip buttons
+- Background ambient space music (generate with Web Audio API: 
+  low drone, 40-80 Hz, very quiet)
+
+== PERFORMANCE ==
+- Load data in chunks: fetch /api/stars → parse → build instanced meshes
+- Show progress: "Loading 3,412 neutron stars..." with actual count
+- FPS display (researcher mode only) 
+- Frustum culling: don't render objects behind camera
+- Mobile detection: if touch device, reduce to 500 most significant objects
+  (sort by Edot descending — show the most energetic ones)
+- Loading screen: dark background, animated pulsar pulse graphic, 
+  "Pulsar Galaxy Explorer" title
+
+== UI LAYOUT ==
+Desktop:
+  Left sidebar (280px): filters, class legend
+  Center: 3D view (fills remaining width)  
+  Right panel (360px, slides in on click): object detail
+  Bottom bar: tour controls when active
+  Top bar: app name, view toggles (Galaxy/Top-down/Edge-on/P-Pdot), 
+           mode toggle (Public/Researcher), audio toggle, tour button
+
+Mobile:
+  Full screen 3D view
+  Bottom sheet for filters (swipe up)
+  Bottom sheet for detail panel (swipe up on click)
+  Top bar minimized
+
+== COLOR SCHEME ==
+Background: #000005 (near black with blue tint)
+UI panels: rgba(5, 8, 20, 0.92) with backdrop blur
+Borders: rgba(100, 140, 255, 0.15) 
+Text primary: #e8eeff
+Text secondary: #6888bb
+Accent: #4488ff
+Class colors as defined above
+
+Typography:
+  Headers: 'Space Grotesk' or system monospace
+  Data values: monospace
+  Descriptions: clean sans-serif
+
+Load fonts from Google Fonts:
+https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap
+
+Build Phase 1 (data pipeline + API + basic classified rendering) first.
+Show me the result before building Phase 2 (P-Pdot) and Phase 3 (Tours).
