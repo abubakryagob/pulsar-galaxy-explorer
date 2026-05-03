@@ -1,821 +1,1058 @@
-    // Import Three.js modules
-    import * as THREE from 'three';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-    import { pulsarData } from '../data/processed_pulsar_data.js';
+/**
+ * Pulsar Galaxy Explorer — Three.js Frontend v2.0
+ * Fetches data from /api/stars, renders with InstancedMesh per class
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
-    // Error handling
-    window.addEventListener('error', function(e) {
-      const errorDisplay = document.getElementById('error-display');
-      errorDisplay.style.display = 'block';
-      errorDisplay.textContent += `ERROR: ${e.message} at ${e.filename}:${e.lineno}\n`;
-      console.error(e);
+// ── Class definitions ─────────────────────────────────────────────────────────
+const CLASS_DEF = {
+  CANONICAL:     { color: 0x4488ff, size: 0.18, label: 'Canonical Pulsar' },
+  RECYCLED_MSP:  { color: 0xffd700, size: 0.14, label: 'Recycled MSP' },
+  FAST_MSP:      { color: 0xffaa00, size: 0.13, label: 'Fast MSP' },
+  MAGNETAR:      { color: 0xff2244, size: 0.30, label: 'Magnetar' },
+  RRAT:          { color: 0xaa44ff, size: 0.22, label: 'RRAT' },
+  ISOLATED_NS:   { color: 0xccddee, size: 0.16, label: 'Isolated NS' },
+  CCO:           { color: 0x7799aa, size: 0.17, label: 'CCO' },
+  BINARY_PULSAR: { color: 0x00ffcc, size: 0.20, label: 'Binary Pulsar' },
+};
+const CLASS_ORDER = Object.keys(CLASS_DEF);
+
+const CLASS_DESCRIPTIONS = {
+  CANONICAL: (s) => `A normal rotation-powered pulsar spinning ${s.p0 ? 'once every ' + s.p0.toFixed(3) + ' seconds' : 'at a typical rate'}. These are the most common neutron stars — collapsed stellar cores left behind after a supernova explosion. They beam radio waves like a cosmic lighthouse.`,
+  RECYCLED_MSP: (s) => `A millisecond pulsar spun up by stealing mass from a binary companion, recycled to extraordinary speeds. At ${s.p0 ? (1/s.p0).toFixed(0) + ' rotations per second' : 'millisecond periods'}, it's one of nature's most stable clocks — more regular than an atomic clock.`,
+  FAST_MSP: (s) => `A solitary millisecond pulsar — once in a binary system, its companion was likely evaporated by pulsar wind. Now spinning ${s.p0 ? 'at ' + (1/s.p0).toFixed(0) + ' Hz' : 'hundreds of times per second'}, it carries the momentum of its violent past.`,
+  MAGNETAR: (s) => `An ultra-magnetized neutron star with fields ${s.bsurf_g ? 'of 10¹⁴–¹⁵ Gauss — trillions of times Earth\'s field' : 'far beyond ordinary pulsars'}. Magnetars occasionally unleash colossal gamma-ray flares visible across the galaxy, releasing more energy in seconds than the Sun emits in centuries.`,
+  RRAT: (s) => `A Rotating Radio Transient — a neutron star that only occasionally emits detectable radio pulses, perhaps only a few times per hour. Whether RRATs are a distinct population or an extreme tail of normal pulsars remains an open question.`,
+  ISOLATED_NS: (s) => `An X-ray Isolated Neutron Star: thermally cooling and radio-quiet, detected only by its soft X-ray glow as residual heat from the supernova slowly radiates away. These objects give us a direct window into the neutron star cooling equation.`,
+  CCO: (s) => `A Central Compact Object — a neutron star at the center of a supernova remnant, quietly cooling without observable radio or gamma-ray emission. Its origin and internal physics remain actively debated.`,
+  BINARY_PULSAR: (s) => `A pulsar in orbit with a companion star. Binary pulsars are precision laboratories for testing general relativity: the famous Hulse-Taylor pulsar earned a Nobel Prize by showing the orbit shrinking exactly as Einstein's theory predicts from gravitational wave emission.`,
+};
+
+// ── Global state ──────────────────────────────────────────────────────────────
+let scene, camera, renderer, controls, composer, bloomPass, clock;
+let instancedMeshes = {};      // { CLASS: THREE.InstancedMesh }
+let starArrays = {};           // { CLASS: [star, ...] }
+let allStars = [];             // flat array of all stars
+let visibleFlags = [];         // parallel to allStars
+let starIndexMap = new Map();  // jname → {star, classIdx, localIdx}
+
+let selectedStar = null;
+let hoveredInfo = null;
+let animT = 0;
+
+// Camera transition
+let camTarget = { pos: new THREE.Vector3(), lookAt: new THREE.Vector3() };
+let camTransitioning = false;
+let camTransitionT = 0;
+let camTransitionDuration = 1.8;
+let camFromPos = new THREE.Vector3();
+let camFromLookAt = new THREE.Vector3();
+let camToPos = new THREE.Vector3();
+let camToLookAt = new THREE.Vector3();
+
+// Audio
+let audioCtx = null;
+let audioEnabled = false;
+let activeOsc = null;
+let hoverOsc = null;
+
+// Filter state (defaults match slider initial values in HTML)
+let filterState = {
+  classes: new Set(CLASS_ORDER),
+  periodMin: 1e-3,    // 10^-3 s
+  periodMax: 32,       // 10^1.5 s
+  distMin: 0,
+  distMax: 100,        // show everything by default (slider display is informational)
+  bfieldMin: 1e8,
+  bfieldMax: 1e15,
+};
+
+// FPS tracking
+let frameCount = 0, lastFPSTime = 0, fps = 0;
+let researcherMode = false;
+
+// Dummy for matrix updates
+const dummy = new THREE.Object3D();
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+async function init() {
+  setProgress(5, 'Starting Three.js scene...');
+  setupScene();
+
+  setProgress(15, 'Fetching pulsar catalogue...');
+  try {
+    await loadData();
+  } catch (err) {
+    console.error('Failed to load data:', err);
+    setStatus('Error loading data: ' + err.message);
+    return;
+  }
+
+  setProgress(85, 'Building galaxy...');
+  buildGalaxySurround();
+
+  setProgress(92, 'Finalizing rendering...');
+  setupPostProcessing();
+  setupUI();
+  setupEventListeners();
+  applyFilters();
+
+  setProgress(100, 'Ready!');
+  setTimeout(fadeOutLoading, 600);
+
+  clock = new THREE.Clock();
+  animate();
+}
+
+// ── Scene setup ───────────────────────────────────────────────────────────────
+function setupScene() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000005);
+  scene.fog = new THREE.FogExp2(0x000005, 0.004);
+
+  const canvas = document.getElementById('three-canvas');
+  const wrap = document.getElementById('canvas-wrap');
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+
+  camera = new THREE.PerspectiveCamera(55, wrap.clientWidth / wrap.clientHeight, 0.05, 800);
+  camera.position.set(0, 25, 55);
+  camera.lookAt(0, 0, 0);
+
+  controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+  controls.maxDistance = 350;
+  controls.minDistance = 0.5;
+  controls.target.set(0, 0, 0);
+
+  window.addEventListener('resize', onResize);
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+async function loadData() {
+  const res = await fetch('/api/stars');
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  const { stars, count } = await res.json();
+
+  setStatus(`Building ${count.toLocaleString()} neutron stars...`);
+  document.getElementById('loading-count').textContent = `${count.toLocaleString()} objects`;
+
+  // Group by class
+  CLASS_ORDER.forEach(cls => { starArrays[cls] = []; });
+  allStars = stars;
+
+  stars.forEach((star, idx) => {
+    const cls = CLASS_DEF[star.ns_class] ? star.ns_class : 'CANONICAL';
+    star._cls = cls;
+    star._localIdx = starArrays[cls].length;
+    star._globalIdx = idx;
+    starArrays[cls].push(star);
+    starIndexMap.set(star.jname, star);
+  });
+
+  setProgress(50, 'Creating instanced meshes...');
+
+  // Build one InstancedMesh per class
+  const baseGeo = new THREE.SphereGeometry(1, 6, 6);
+
+  CLASS_ORDER.forEach((cls, ci) => {
+    const arr = starArrays[cls];
+    if (!arr.length) return;
+    const def = CLASS_DEF[cls];
+    setProgress(50 + ci * 4, `Loading ${def.label}...`);
+
+    const mat = new THREE.MeshBasicMaterial({
+      color: def.color,
+      transparent: true,
+      opacity: cls === 'MAGNETAR' ? 0.95 : 0.80,
     });
 
-    // Global variables
-    let scene, camera, renderer, controls, clock;
-    let composer, bloomPass;
-    let starfield, pulsarSystem;
-    let isInitialized = false;
-    
-    // Audio variables
-    let audioContext, audioAnalyser, audioGain;
-    let isAudioInitialized = false;
-    let activeAudioOscillator = null;
-    let audioEnabled = true;
+    const mesh = new THREE.InstancedMesh(baseGeo, mat, arr.length);
+    mesh.userData.cls = cls;
+    mesh.frustumCulled = false;
 
-    // Display video for selected pulsar
-    let displayVideo;
-    let pulsarVideo; // Video element for info panel
+    arr.forEach((star, i) => {
+      positionDummy(star, def.size, 0);
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.count = arr.length;
 
-    // Pulsar management
-    const pulsars = [];
-    let selectedPulsar = null;
-    let currentViewMode = 'all';
-    let visiblePulsars = [];
-    let selectedPulsarEffects = null; // For enhanced visual effects
+    instancedMeshes[cls] = mesh;
+    scene.add(mesh);
+  });
 
-    // Configuration
-    const CONFIG = {
-      galaxyRadius: 50,
-      galaxyThickness: 8,
-      starCount: 5000,
-      pulsarSizeRange: [0.08, 0.3],
-      fastPulsarThreshold: 0.1,
-      slowPulsarThreshold: 1.0,
-      bloomStrength: 1.5,
-      bloomRadius: 0.5,
-      bloomThreshold: 0.05,
-      selectedPulsarScale: 2.0,
-      defaultVolume: 0.15,
-      maxRenderDistance: 100,
-      performanceMode: pulsarData.length > 2000 // Enable performance mode for large datasets
-    };
+  // Update star count badge
+  document.getElementById('star-count-badge').textContent = `${count.toLocaleString()} neutron stars`;
+  setProgress(80, 'Positioning stars...');
+}
 
-    console.log(`Loading ${pulsarData.length} pulsars...`);
-    // console.log(`Fast: ${pulsarStats.fastPulsars}, Medium: ${pulsarStats.mediumPulsars}, Slow: ${pulsarStats.slowPulsars}`);
+function positionDummy(star, size, phase) {
+  const x = star.x_kpc || 0;
+  const y = star.y_kpc || 0;
+  const z = star.z_kpc || 0;
+  dummy.position.set(x, y, z);
+  dummy.scale.setScalar(size);
+  dummy.rotation.set(0, 0, 0);
+  dummy.updateMatrix();
+}
 
-    // Initialize display video for pulsar information panel
-    function initDisplayVideo() {
-      displayVideo = document.getElementById('pulsar-display-video');
-      displayVideo.addEventListener('loadeddata', () => {
-        console.log('Pulsar display video loaded successfully');
-      });
-      
-      displayVideo.addEventListener('error', (e) => {
-        console.error('Error loading pulsar display video:', e);
-      });
+// ── Galaxy surroundings ───────────────────────────────────────────────────────
+function buildGalaxySurround() {
+  // Background star field — 60k particles
+  const N = 60000;
+  const positions = new Float32Array(N * 3);
+  const colors = new Float32Array(N * 3);
+
+  for (let i = 0; i < N; i++) {
+    // Gaussian distribution in xy, flattened in z
+    const u1 = Math.random(), u2 = Math.random();
+    const r = Math.sqrt(-2 * Math.log(Math.max(u1, 0.0001)));
+    const angle = Math.random() * Math.PI * 2;
+    const radius = r * 18;
+
+    positions[i * 3]     = Math.cos(angle) * radius;
+    positions[i * 3 + 1] = (Math.random() - 0.5) * 4;
+    positions[i * 3 + 2] = Math.sin(angle) * radius;
+
+    // Color gradient: hot blue-white center → warm outer
+    const t = Math.min(radius / 30, 1);
+    colors[i * 3]     = 0.7 + t * 0.3;
+    colors[i * 3 + 1] = 0.75 + t * 0.1;
+    colors[i * 3 + 2] = 1.0 - t * 0.5;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  const mat = new THREE.PointsMaterial({
+    size: 0.08,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.55,
+    sizeAttenuation: true,
+  });
+
+  scene.add(new THREE.Points(geo, mat));
+
+  // Galactic plane disc
+  const discGeo = new THREE.CircleGeometry(45, 64);
+  const discMat = new THREE.MeshBasicMaterial({
+    color: 0x223355,
+    transparent: true,
+    opacity: 0.08,
+    side: THREE.DoubleSide,
+  });
+  const disc = new THREE.Mesh(discGeo, discMat);
+  disc.rotation.x = Math.PI / 2;
+  scene.add(disc);
+
+  // Spiral arm traces (4 arms, parametric)
+  const armAngles = [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2];
+  const armColors = [0x334466, 0x334466, 0x334466, 0x334466];
+  armAngles.forEach((startAngle, ai) => {
+    const pts = [];
+    for (let t = 0; t <= 1; t += 0.01) {
+      const r = 3 + t * 38;
+      const theta = startAngle + t * 3.5;
+      pts.push(new THREE.Vector3(
+        Math.cos(theta) * r,
+        (Math.random() - 0.5) * 0.3,
+        Math.sin(theta) * r
+      ));
     }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const armGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(200));
+    const armMat = new THREE.LineBasicMaterial({
+      color: armColors[ai],
+      transparent: true,
+      opacity: 0.20,
+    });
+    scene.add(new THREE.Line(armGeo, armMat));
+  });
 
-    // Initialize video for info panel
-    function initVideo() {
-      pulsarVideo = document.getElementById('pulsar-video');
-      if (pulsarVideo) {
-        pulsarVideo.addEventListener('loadeddata', () => {
-          console.log('Pulsar video loaded successfully for info panel');
-        });
-        
-        pulsarVideo.addEventListener('error', (e) => {
-          console.error('Error loading pulsar video for info panel:', e);
-        });
-        
-        // Start with video hidden
-        pulsarVideo.style.display = 'none';
-      } else {
-        console.warn('Pulsar video element not found in info panel');
-      }
-    }
+  // Sun marker
+  const sunGeo = new THREE.SphereGeometry(0.25, 8, 8);
+  const sunMat = new THREE.MeshBasicMaterial({ color: 0xffee88 });
+  const sun = new THREE.Mesh(sunGeo, sunMat);
+  sun.position.set(8.5, 0, 0);  // Sun ~8.5 kpc from GC
+  scene.add(sun);
+  addLabel('☉ Sun', new THREE.Vector3(8.5, 0.6, 0), 0xffee88);
 
-    // Initialize audio system
-    function initAudio() {
-      try {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        audioGain = audioContext.createGain();
-        audioGain.gain.value = CONFIG.defaultVolume;
-        audioAnalyser = audioContext.createAnalyser();
-        audioAnalyser.fftSize = 2048;
-        
-        audioGain.connect(audioAnalyser);
-        audioAnalyser.connect(audioContext.destination);
-        
-        isAudioInitialized = true;
-        console.log("Audio system initialized");
-        
-        // Set initial volume slider value
-        document.getElementById('volume-slider').value = CONFIG.defaultVolume * 100;
-      } catch (error) {
-        console.error("Failed to initialize audio:", error);
-      }
-    }
+  // Galactic centre marker
+  const gcGeo = new THREE.SphereGeometry(0.5, 8, 8);
+  const gcMat = new THREE.MeshBasicMaterial({ color: 0xff8833 });
+  scene.add(new THREE.Mesh(gcGeo, gcMat));
+  addLabel('Galactic Centre', new THREE.Vector3(0, 1.0, 0), 0xff8833);
 
-    // Play pulsar sound
-    function playPulsarSound(pulsar) {
-      stopPulsarSound();
-      
-      if (!isAudioInitialized || !audioEnabled) return;
-      
-      try {
-        if (audioContext.state === 'suspended') {
-          audioContext.resume();
-        }
-        
-        const period = pulsar.period;
-        if (!period || period <= 0) return;
-        
-        // Calculate actual pulsar frequency (pulses per second)
-        const pulsarFrequency = 1 / period; // Hz (pulses per second)
-        
-        // For very fast pulsars (>20 Hz), use the frequency directly as audio tone
-        // For slower pulsars (<20 Hz), use a base tone with pulsing at the real frequency
-        let audioFrequency, pulseRate;
-        
-        if (pulsarFrequency >= 20) {
-          // Fast pulsars: use the actual frequency as audio tone
-          audioFrequency = Math.min(2000, pulsarFrequency); // Cap at 2kHz for hearing safety
-          pulseRate = 0; // No additional pulsing needed
-        } else {
-          // Slower pulsars: use a base tone with pulsing at real frequency
-          // Map to audible range (200-800 Hz base tone)
-          const minFreq = 200;
-          const maxFreq = 800;
-          const logPeriod = Math.log(period);
-          const logMin = Math.log(0.05); // 20 Hz
-          const logMax = Math.log(10);   // 0.1 Hz
-          const normalizedLog = Math.max(0, Math.min(1, (logPeriod - logMin) / (logMax - logMin)));
-          audioFrequency = minFreq + (1 - normalizedLog) * (maxFreq - minFreq);
-          pulseRate = pulsarFrequency; // Use actual pulsar frequency for pulsing
-        }
-        
-        // Create oscillator for the base tone
-        const oscillator = audioContext.createOscillator();
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(audioFrequency, audioContext.currentTime);
-        
-        // Create gain modulator for pulsing effect
-        const modulator = audioContext.createGain();
-        
-        if (pulseRate > 0) {
-          // Apply pulsing at the actual pulsar frequency
-          modulator.gain.value = 0.1; // Base volume
-          
-          const now = audioContext.currentTime;
-          const pulseDuration = Math.min(0.1, period * 0.1); // 10% of period, max 0.1s
-          const totalDuration = 10; // Play for 10 seconds
-          const totalPulses = Math.ceil(totalDuration * pulseRate);
-          
-          // Schedule pulses at the exact pulsar frequency
-          for (let i = 0; i < totalPulses; i++) {
-            const pulseTime = now + (i / pulseRate);
-            
-            // Sharp pulse: quick rise to full volume, then decay
-            modulator.gain.setValueAtTime(0.1, pulseTime);
-            modulator.gain.linearRampToValueAtTime(1.0, pulseTime + pulseDuration * 0.1);
-            modulator.gain.exponentialRampToValueAtTime(0.1, pulseTime + pulseDuration);
-          }
-        } else {
-          // Constant tone for very fast pulsars
-          modulator.gain.value = 0.5;
-        }
-        
-        // Connect audio chain
-        oscillator.connect(modulator);
-        modulator.connect(audioGain);
-        oscillator.start();
-        
-        // Schedule stop after 10 seconds
-        oscillator.stop(audioContext.currentTime + 10);
-        
-        activeAudioOscillator = { oscillator, modulator };
-        
-        const description = pulseRate > 0 ? 
-          `${pulsarFrequency.toFixed(3)} Hz pulses on ${audioFrequency.toFixed(0)} Hz tone` :
-          `${pulsarFrequency.toFixed(0)} Hz direct frequency`;
-        
-        console.log(`Playing ${pulsar.name}: ${period}s period = ${description}`);
-      } catch (error) {
-        console.error("Failed to play pulsar sound:", error);
-      }
-    }
+  // Galactic coordinate grid (30° spacing)
+  buildCoordinateGrid();
+}
 
-    // Stop pulsar sound
-    function stopPulsarSound() {
-      if (activeAudioOscillator) {
-        try {
-          activeAudioOscillator.oscillator.stop();
-          activeAudioOscillator.oscillator.disconnect();
-          activeAudioOscillator.modulator.disconnect();
-        } catch (error) {
-          console.error("Error stopping sound:", error);
-        }
-        activeAudioOscillator = null;
-      }
-    }
+function addLabel(text, pos, color) {
+  // Use a sprite for labels
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
+  ctx.font = 'bold 28px "Space Grotesk", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 32);
 
-    // Create enhanced visual effects for selected pulsar
-    function createPulsarEffects(pulsar) {
-      const effects = {
-        particles: null,
-        rings: [],
-        beams: [],
-        group: new THREE.Group()
-      };
-      
-      const pulsarPos = pulsar.position;
-      const period = pulsar.userData.period;
-      const color = pulsar.userData.colorTint || pulsar.userData.color || new THREE.Color(0x00ffea);
-      
-      // 1. Particle system for pulsar wind/emissions
-      const particleCount = Math.min(1000, Math.max(200, Math.floor(1000 / period)));
-      const particleGeometry = new THREE.BufferGeometry();
-      const particlePositions = new Float32Array(particleCount * 3);
-      const particleVelocities = new Float32Array(particleCount * 3);
-      const particleSizes = new Float32Array(particleCount);
-      const particleColors = new Float32Array(particleCount * 3);
-      
-      for (let i = 0; i < particleCount; i++) {
-        // Start particles at pulsar position with slight randomness
-        particlePositions[i * 3] = pulsarPos.x + (Math.random() - 0.5) * 0.5;
-        particlePositions[i * 3 + 1] = pulsarPos.y + (Math.random() - 0.5) * 0.5;
-        particlePositions[i * 3 + 2] = pulsarPos.z + (Math.random() - 0.5) * 0.5;
-        
-        // Random velocities for particle expansion
-        const phi = Math.random() * Math.PI * 2;
-        const theta = Math.random() * Math.PI;
-        const speed = 0.5 + Math.random() * 1.5;
-        
-        particleVelocities[i * 3] = Math.sin(theta) * Math.cos(phi) * speed;
-        particleVelocities[i * 3 + 1] = Math.cos(theta) * speed;
-        particleVelocities[i * 3 + 2] = Math.sin(theta) * Math.sin(phi) * speed;
-        
-        particleSizes[i] = 0.1 + Math.random() * 0.2;
-        
-        // Color variations based on pulsar color
-        particleColors[i * 3] = color.r + (Math.random() - 0.5) * 0.3;
-        particleColors[i * 3 + 1] = color.g + (Math.random() - 0.5) * 0.3;
-        particleColors[i * 3 + 2] = color.b + (Math.random() - 0.5) * 0.3;
-      }
-      
-      particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-      particleGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
-      particleGeometry.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
-      
-      const particleMaterial = new THREE.PointsMaterial({
-        size: 0.1,
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending
-      });
-      
-      effects.particles = new THREE.Points(particleGeometry, particleMaterial);
-      effects.particles.userData = { velocities: particleVelocities, originalPositions: particlePositions.slice() };
-      effects.group.add(effects.particles);
-      
-      // 2. Pulsing rings at different scales
-      for (let i = 0; i < 3; i++) {
-        const ringGeometry = new THREE.RingGeometry(0.5 + i * 0.3, 0.6 + i * 0.3, 32);
-        const ringMaterial = new THREE.MeshBasicMaterial({
-          color: color,
-          transparent: true,
-          opacity: 0.3 - i * 0.1,
-          side: THREE.DoubleSide,
-          blending: THREE.AdditiveBlending
-        });
-        
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-        ring.position.copy(pulsarPos);
-        ring.userData = { 
-          originalScale: 1,
-          pulsePhase: i * (Math.PI * 2 / 3), // Offset phases
-          pulseSpeed: 1 / period
-        };
-        
-        effects.rings.push(ring);
-        effects.group.add(ring);
-      }
-      
-      // 3. Rotating beams for fast pulsars
-      if (period < 1) {
-        for (let i = 0; i < 2; i++) {
-          const beamGeometry = new THREE.CylinderGeometry(0.02, 0.02, 8, 8);
-          const beamMaterial = new THREE.MeshBasicMaterial({
-            color: color,
-            transparent: true,
-            opacity: 0.4,
-            blending: THREE.AdditiveBlending
-          });
-          
-          const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-          beam.position.copy(pulsarPos);
-          beam.rotation.z = i * Math.PI; // Opposite beams
-          beam.userData = { 
-            rotationSpeed: (1 / period) * 2 * Math.PI,
-            axis: i
-          };
-          
-          effects.beams.push(beam);
-          effects.group.add(beam);
-        }
-      }
-      
-      effects.group.position.copy(pulsarPos);
-      scene.add(effects.group);
-      
-      return effects;
-    }
-    
-    // Remove pulsar effects
-    function removePulsarEffects() {
-      if (selectedPulsarEffects) {
-        scene.remove(selectedPulsarEffects.group);
-        
-        // Clean up geometries and materials
-        if (selectedPulsarEffects.particles) {
-          selectedPulsarEffects.particles.geometry.dispose();
-          selectedPulsarEffects.particles.material.dispose();
-        }
-        
-        selectedPulsarEffects.rings.forEach(ring => {
-          ring.geometry.dispose();
-          ring.material.dispose();
-        });
-        
-        selectedPulsarEffects.beams.forEach(beam => {
-          beam.geometry.dispose();
-          beam.material.dispose();
-        });
-        
-        selectedPulsarEffects = null;
-      }
-    }
-    
-    // Update pulsar effects animation
-    function updatePulsarEffects(deltaTime, elapsedTime) {
-      if (!selectedPulsarEffects) return;
-      
-      const period = selectedPulsar.userData.period;
-      const frequency = 1 / period;
-      
-      // Update particles
-      if (selectedPulsarEffects.particles) {
-        const positions = selectedPulsarEffects.particles.geometry.attributes.position.array;
-        const velocities = selectedPulsarEffects.particles.userData.velocities;
-        const originalPositions = selectedPulsarEffects.particles.userData.originalPositions;
-        
-        for (let i = 0; i < positions.length; i += 3) {
-          // Move particles outward
-          positions[i] += velocities[i] * deltaTime * 5;
-          positions[i + 1] += velocities[i + 1] * deltaTime * 5;
-          positions[i + 2] += velocities[i + 2] * deltaTime * 5;
-          
-          // Reset particles that go too far
-          const distance = Math.sqrt(
-            Math.pow(positions[i] - selectedPulsar.position.x, 2) +
-            Math.pow(positions[i + 1] - selectedPulsar.position.y, 2) +
-            Math.pow(positions[i + 2] - selectedPulsar.position.z, 2)
-          );
-          
-          if (distance > 5) {
-            positions[i] = originalPositions[i] + selectedPulsar.position.x;
-            positions[i + 1] = originalPositions[i + 1] + selectedPulsar.position.y;
-            positions[i + 2] = originalPositions[i + 2] + selectedPulsar.position.z;
-          }
-        }
-        
-        selectedPulsarEffects.particles.geometry.attributes.position.needsUpdate = true;
-      }
-      
-      // Update rings
-      selectedPulsarEffects.rings.forEach((ring, index) => {
-        const pulsePhase = ring.userData.pulsePhase + elapsedTime * ring.userData.pulseSpeed * Math.PI * 2;
-        const pulseScale = 1 + Math.sin(pulsePhase) * 0.5;
-        ring.scale.setScalar(pulseScale);
-        ring.material.opacity = (0.3 - index * 0.1) * (0.5 + Math.sin(pulsePhase) * 0.5);
-        
-        // Rotate rings slowly
-        ring.rotation.z += deltaTime * frequency * 0.5;
-      });
-      
-      // Update beams (for fast pulsars)
-      selectedPulsarEffects.beams.forEach(beam => {
-        beam.rotation.y += deltaTime * beam.userData.rotationSpeed;
-        
-        // Pulse beam intensity
-        const pulseIntensity = 0.4 + Math.sin(elapsedTime * frequency * Math.PI * 2) * 0.3;
-        beam.material.opacity = pulseIntensity;
-      });
-    }
+  const tex = new THREE.CanvasTexture(canvas);
+  const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.8 });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.position.copy(pos);
+  sprite.scale.set(6, 1.5, 1);
+  sprite.userData.isLabel = true;
+  scene.add(sprite);
+}
 
-    // Create starfield background
-    function createStarfield() {
-      const starGeometry = new THREE.BufferGeometry();
-      const starPositions = new Float32Array(CONFIG.starCount * 3);
-      const starColors = new Float32Array(CONFIG.starCount * 3);
-      
-      for (let i = 0; i < CONFIG.starCount; i++) {
-        // Galaxy disk distribution
-        const radius = Math.sqrt(Math.random()) * CONFIG.galaxyRadius;
-        const angle = Math.random() * Math.PI * 2;
-        const height = (Math.random() - 0.5) * CONFIG.galaxyThickness;
-        
-        starPositions[i * 3] = Math.cos(angle) * radius;
-        starPositions[i * 3 + 1] = height;
-        starPositions[i * 3 + 2] = Math.sin(angle) * radius;
-        
-        // Bluish white colors
-        starColors[i * 3] = 0.8 + Math.random() * 0.2;     // R
-        starColors[i * 3 + 1] = 0.8 + Math.random() * 0.2; // G
-        starColors[i * 3 + 2] = 1.0;                       // B
+function buildCoordinateGrid() {
+  const mat = new THREE.LineBasicMaterial({ color: 0x112233, transparent: true, opacity: 0.3 });
+  const R = 50;
+  // Longitude lines every 30°
+  for (let gl = 0; gl < 360; gl += 30) {
+    const rad = gl * Math.PI / 180;
+    const pts = [
+      new THREE.Vector3(Math.cos(rad) * -R, 0, Math.sin(rad) * -R),
+      new THREE.Vector3(Math.cos(rad) * R, 0, Math.sin(rad) * R),
+    ];
+    scene.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(pts), mat
+    ));
+  }
+  // Two latitude circles
+  [-10, 10].forEach(gb => {
+    const y = R * Math.sin(gb * Math.PI / 180);
+    const r = R * Math.cos(gb * Math.PI / 180);
+    const pts = [];
+    for (let i = 0; i <= 64; i++) {
+      const a = (i / 64) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
+    }
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+  });
+}
+
+// ── Post-processing ───────────────────────────────────────────────────────────
+function setupPostProcessing() {
+  const wrap = document.getElementById('canvas-wrap');
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(wrap.clientWidth, wrap.clientHeight),
+    0.8, 0.5, 0.1
+  );
+  composer.addPass(bloomPass);
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────────
+function applyFilters() {
+  let visible = 0;
+  CLASS_ORDER.forEach(cls => {
+    const mesh = instancedMeshes[cls];
+    if (!mesh) return;
+    const arr = starArrays[cls];
+    const clsOn = filterState.classes.has(cls);
+
+    arr.forEach((star, i) => {
+      const show = clsOn
+        && (star.p0 == null || (star.p0 >= filterState.periodMin && star.p0 <= filterState.periodMax))
+        && (star.dist_kpc == null || (star.dist_kpc >= filterState.distMin && star.dist_kpc <= filterState.distMax))
+        && (star.bsurf_g == null || (star.bsurf_g >= filterState.bfieldMin && star.bsurf_g <= filterState.bfieldMax));
+
+      const s = show ? CLASS_DEF[cls].size : 0;
+      dummy.position.set(star.x_kpc || 0, star.y_kpc || 0, star.z_kpc || 0);
+      dummy.scale.setScalar(s);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      star._visible = show;
+      if (show) visible++;
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  });
+
+  document.getElementById('visible-count-display').textContent = `Showing ${visible.toLocaleString()} objects`;
+}
+
+// ── Animation loop ────────────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = clock.getDelta();
+  animT += delta;
+
+  // FPS
+  frameCount++;
+  if (animT - lastFPSTime >= 1) {
+    fps = frameCount;
+    frameCount = 0;
+    lastFPSTime = animT;
+    if (researcherMode) {
+      document.getElementById('fps-display').textContent = `${fps} FPS`;
+    }
+  }
+
+  // Camera transition
+  if (camTransitioning) {
+    camTransitionT += delta / camTransitionDuration;
+    const t = easeInOutCubic(Math.min(camTransitionT, 1));
+    camera.position.lerpVectors(camFromPos, camToPos, t);
+    const lk = new THREE.Vector3().lerpVectors(camFromLookAt, camToLookAt, t);
+    controls.target.copy(lk);
+    if (camTransitionT >= 1) {
+      camTransitioning = false;
+      controls.enabled = true;
+    }
+  }
+
+  // Animate instanced meshes
+  animateClasses(delta);
+
+  controls.update();
+  composer.render();
+}
+
+function animateClasses(delta) {
+  // MAGNETAR: pulsing glow
+  const magMesh = instancedMeshes['MAGNETAR'];
+  if (magMesh) {
+    const pulse = 1.0 + 0.35 * Math.sin(animT * 1.8);
+    magMesh.material.opacity = 0.7 + 0.25 * Math.abs(Math.sin(animT * 1.8));
+    magMesh.material.needsUpdate = true;
+  }
+
+  // RRAT: intermittent visibility
+  const rratMesh = instancedMeshes['RRAT'];
+  if (rratMesh) {
+    const arr = starArrays['RRAT'];
+    arr.forEach((star, i) => {
+      if (!star._visible) return;
+      const phase = i * 2.31 + animT * 0.7;
+      const fade = Math.max(0, Math.sin(phase));
+      const s = CLASS_DEF['RRAT'].size * fade;
+      dummy.position.set(star.x_kpc || 0, star.y_kpc || 0, star.z_kpc || 0);
+      dummy.scale.setScalar(s);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      rratMesh.setMatrixAt(i, dummy.matrix);
+    });
+    rratMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // RECYCLED_MSP: fast spin glow
+  const mspMesh = instancedMeshes['RECYCLED_MSP'];
+  if (mspMesh) {
+    const glow = 0.7 + 0.3 * Math.abs(Math.sin(animT * 3));
+    mspMesh.material.opacity = glow;
+    mspMesh.material.needsUpdate = true;
+  }
+
+  // Highlight selected star
+  if (selectedStar) {
+    const cls = selectedStar._cls;
+    const mesh = instancedMeshes[cls];
+    if (mesh) {
+      const def = CLASS_DEF[cls];
+      const pulseSel = def.size * (2.0 + 0.4 * Math.sin(animT * 4));
+      dummy.position.set(selectedStar.x_kpc || 0, selectedStar.y_kpc || 0, selectedStar.z_kpc || 0);
+      dummy.scale.setScalar(pulseSel);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(selectedStar._localIdx, dummy.matrix);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// ── Raycasting ────────────────────────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points = { threshold: 0.5 };
+const pointer = new THREE.Vector2();
+
+function getCanvasPointer(event) {
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+}
+
+function getHoveredStar(event) {
+  getCanvasPointer(event);
+  raycaster.setFromCamera(pointer, camera);
+
+  const meshList = CLASS_ORDER.map(c => instancedMeshes[c]).filter(Boolean);
+  const hits = raycaster.intersectObjects(meshList);
+
+  if (!hits.length) return null;
+  const hit = hits[0];
+  const cls = hit.object.userData.cls;
+  const star = starArrays[cls]?.[hit.instanceId];
+  if (!star || !star._visible) return null;
+  return { star, hit };
+}
+
+// ── Event listeners ───────────────────────────────────────────────────────────
+function setupEventListeners() {
+  const canvas = document.getElementById('three-canvas');
+  let mouseDownPos = { x: 0, y: 0 };
+
+  canvas.addEventListener('mousedown', e => {
+    mouseDownPos = { x: e.clientX, y: e.clientY };
+  });
+
+  canvas.addEventListener('click', e => {
+    const dx = Math.abs(e.clientX - mouseDownPos.x);
+    const dy = Math.abs(e.clientY - mouseDownPos.y);
+    if (dx > 4 || dy > 4) return; // was a drag
+
+    const result = getHoveredStar(e);
+    if (result) {
+      selectStar(result.star);
+    } else {
+      deselectStar();
+    }
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    const result = getHoveredStar(e);
+    const label = document.getElementById('hover-label');
+
+    if (result) {
+      const { star } = result;
+      label.textContent = `${star.jname}  ·  ${CLASS_DEF[star._cls]?.label || star._cls}`;
+      label.style.left = e.clientX - document.getElementById('canvas-wrap').getBoundingClientRect().left + 'px';
+      label.style.top = e.clientY - document.getElementById('canvas-wrap').getBoundingClientRect().top + 'px';
+      label.classList.add('visible');
+
+      // Update HUD
+      document.getElementById('hud-gl').textContent = star.gl != null ? `Gl ${star.gl.toFixed(1)}°` : 'Gl —';
+      document.getElementById('hud-gb').textContent = star.gb != null ? `Gb ${star.gb.toFixed(2)}°` : 'Gb —';
+
+      // Hover audio
+      if (audioEnabled && star !== hoveredInfo?.star) {
+        playHoverTone(star.audio_freq);
       }
-      
-      starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-      starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
-      
-      const starMaterial = new THREE.PointsMaterial({
-        size: 0.1,
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.8
-      });
-      
-      starfield = new THREE.Points(starGeometry, starMaterial);
-      scene.add(starfield);
+      hoveredInfo = result;
+    } else {
+      label.classList.remove('visible');
+      hoveredInfo = null;
+      stopHoverTone();
     }
+  });
 
-    // Create pulsar objects
-    function createPulsars() {
-      // Use simple sphere geometry for point-like sources
-      const pulsarGeometry = new THREE.SphereGeometry(1, 16, 16);
-      
-      // Process pulsars in chunks for better performance
-      let processedCount = 0;
-      const chunkSize = 100;
-      
-      function processChunk() {
-        const endIndex = Math.min(processedCount + chunkSize, pulsarData.length);
-        
-        for (let i = processedCount; i < endIndex; i++) {
-          const pulsarInfo = pulsarData[i];
-          
-          // Convert galactic coordinates to position
-          // Map fields from processed_pulsar_data.js: DIST, GL, GB, P0
-          const distance = pulsarInfo.DIST || 10;
-          const gl = pulsarInfo.GL * (Math.PI / 180);
-          const gb = pulsarInfo.GB * (Math.PI / 180);
-          
-          // Position in galactic coordinates
-          const x = distance * Math.cos(gb) * Math.cos(gl);
-          const y = distance * Math.sin(gb);
-          const z = distance * Math.cos(gb) * Math.sin(gl);
-          
-          // Determine color and size based on period
-          let color, size;
-          const period = pulsarInfo.P0;
-          
-          if (period < CONFIG.fastPulsarThreshold) {
-            color = new THREE.Color(0x00a2ff); // Blue for fast
-            size = CONFIG.pulsarSizeRange[1];
-          } else if (period < CONFIG.slowPulsarThreshold) {
-            color = new THREE.Color(0x00ffea); // Cyan for medium
-            size = CONFIG.pulsarSizeRange[0] + 0.15;
-          } else {
-            color = new THREE.Color(0xc080ff); // Purple for slow
-            size = CONFIG.pulsarSizeRange[0];
-          }
-          
-          // Create material
-          const pulsarMaterial = new THREE.MeshBasicMaterial({
-            color: color,
-            transparent: true,
-            opacity: 0.8
-          });
-          
-          // Create mesh
-          const pulsarMesh = new THREE.Mesh(pulsarGeometry, pulsarMaterial);
-          pulsarMesh.position.set(x, y, z);
-          pulsarMesh.scale.set(size, size, size);
-          
-          // Store pulsar data
-          pulsarMesh.userData = {
-            name: pulsarInfo.JNAME,
-            association: pulsarInfo.ASSOC,
-            period: period,
-            distance: distance,
-            gl: pulsarInfo.GL,
-            gb: pulsarInfo.GB,
-            dm: 0, // Default value
-            originalScale: size,
-            color: color.clone(),
-            originalPosition: new THREE.Vector3(x, y, z)
-          };
-          
-          pulsars.push(pulsarMesh);
-          scene.add(pulsarMesh);
-        }
-        
-        processedCount = endIndex;
-        
-        // Update progress
-        const progress = (processedCount / pulsarData.length) * 80; // Reserve 20% for final setup
-        document.getElementById('progress').style.width = `${progress}%`;
-        
-        if (processedCount < pulsarData.length) {
-          setTimeout(processChunk, 10); // Continue processing
-        } else {
-          finishInitialization();
-        }
-      }
-      
-      processChunk();
+  canvas.addEventListener('mouseleave', () => {
+    document.getElementById('hover-label').classList.remove('visible');
+    stopHoverTone();
+    hoveredInfo = null;
+  });
+}
+
+// ── Star selection ────────────────────────────────────────────────────────────
+function selectStar(star) {
+  // Restore previous
+  if (selectedStar) restoreStarSize(selectedStar);
+  selectedStar = star;
+  showDetailPanel(star);
+  stopHoverTone();
+  if (audioEnabled) playClickTone(star.audio_freq);
+}
+
+function deselectStar() {
+  if (selectedStar) {
+    restoreStarSize(selectedStar);
+    selectedStar = null;
+  }
+  document.getElementById('detail-panel').classList.remove('open');
+  stopClickTone();
+}
+
+function restoreStarSize(star) {
+  const mesh = instancedMeshes[star._cls];
+  if (!mesh) return;
+  const def = CLASS_DEF[star._cls];
+  const show = star._visible ? def.size : 0;
+  dummy.position.set(star.x_kpc || 0, star.y_kpc || 0, star.z_kpc || 0);
+  dummy.scale.setScalar(show);
+  dummy.rotation.set(0, 0, 0);
+  dummy.updateMatrix();
+  mesh.setMatrixAt(star._localIdx, dummy.matrix);
+  mesh.instanceMatrix.needsUpdate = true;
+}
+
+// ── Camera fly-to ─────────────────────────────────────────────────────────────
+function flyTo(star) {
+  if (!star) return;
+  const target = new THREE.Vector3(star.x_kpc || 0, star.y_kpc || 0, star.z_kpc || 0);
+  const dir = camera.position.clone().sub(target).normalize();
+  const newPos = target.clone().addScaledVector(dir, 8);
+
+  camFromPos.copy(camera.position);
+  camFromLookAt.copy(controls.target);
+  camToPos.copy(newPos);
+  camToLookAt.copy(target);
+  camTransitionT = 0;
+  camTransitioning = true;
+  controls.enabled = false;
+}
+
+// ── View modes ────────────────────────────────────────────────────────────────
+function setViewMode(mode) {
+  controls.enabled = true;
+  camTransitioning = false;
+
+  camFromPos.copy(camera.position);
+  camFromLookAt.copy(controls.target);
+
+  if (mode === 'galaxy') {
+    camToPos.set(0, 25, 55);
+    camToLookAt.set(0, 0, 0);
+  } else if (mode === 'topdown') {
+    camToPos.set(0, 80, 0.01);
+    camToLookAt.set(0, 0, 0);
+  } else if (mode === 'edgeon') {
+    camToPos.set(0, 1, 80);
+    camToLookAt.set(0, 0, 0);
+  }
+
+  camTransitionT = 0;
+  camTransitioning = true;
+  controls.enabled = false;
+}
+
+// ── Detail panel ──────────────────────────────────────────────────────────────
+async function showDetailPanel(star) {
+  const panel = document.getElementById('detail-panel');
+  panel.classList.add('open');
+
+  // Basic info from cache
+  const cls = star._cls;
+  const def = CLASS_DEF[cls];
+
+  document.getElementById('panel-jname').textContent = star.jname;
+  const badge = document.getElementById('panel-class-badge');
+  badge.textContent = def.label;
+  badge.className = `panel-badge badge-${cls}`;
+
+  // PUBLIC view
+  fillPublicView(star);
+
+  // Researcher view — fetch full detail
+  if (researcherMode) {
+    fillResearcherView(star);
+    const detail = await fetchStarDetail(star.jname);
+    if (detail) fillResearcherView(detail);
+  }
+}
+
+function fillPublicView(star) {
+  const cls = star._cls;
+
+  // Spin stat
+  const spinEl = document.getElementById('public-spin-stat');
+  if (star.p0) {
+    const hz = 1 / star.p0;
+    if (hz >= 1) {
+      spinEl.textContent = `Spins ${hz.toFixed(1)} times per second`;
+    } else {
+      spinEl.textContent = `One rotation every ${star.p0.toFixed(2)} seconds`;
     }
+  } else {
+    spinEl.textContent = 'Period unknown';
+  }
 
-    // Select pulsar
-    function selectPulsar(pulsar) {
-      // Reset previous selection
-      if (selectedPulsar) {
-        selectedPulsar.scale.setScalar(selectedPulsar.userData.originalScale);
-        selectedPulsar.material.opacity = 0.9;
-        removePulsarEffects(); // Remove previous effects
-      }
-      
-      selectedPulsar = pulsar;
-      
-      // Highlight selected pulsar
-      pulsar.scale.setScalar(pulsar.userData.originalScale * CONFIG.selectedPulsarScale);
-      pulsar.material.opacity = 1.0;
-      
-      // Adjust video playback speed to match pulsar frequency
-      const period = pulsar.userData.period;
-      const pulsarFrequency = 1 / period;
-      
-      // The original video shows a 1.3-second pulsar
-      const originalPeriod = 1.3;
-      const speedMultiplier = originalPeriod / period;
-      
-      // Clamp speed for practical viewing (0.1x to 10x)
-      const clampedSpeed = Math.max(0.1, Math.min(10, speedMultiplier));
-      
-      // Control video display in information panel
-      if (pulsarVideo) {
-        pulsarVideo.playbackRate = clampedSpeed;
-        const videoElement = document.getElementById('pulsar-video');
-        if (videoElement) {
-          videoElement.style.display = 'block';
-          pulsarVideo.play();
-        }
-        console.log(`Adjusted video speed: ${clampedSpeed.toFixed(2)}x for ${period.toFixed(3)}s period`);
-      }
-      
-      // Create enhanced visual effects
-      selectedPulsarEffects = createPulsarEffects(pulsar);
-      
-      // Update info panel
-      const detailsPanel = document.getElementById('pulsar-details');
-      detailsPanel.classList.add('visible');
-      
-      document.getElementById('pulsar-name').textContent = pulsar.userData.name || 'Unknown';
-      document.getElementById('pulsar-period').textContent = `${pulsar.userData.period.toFixed(6)}s`;
-      document.getElementById('pulsar-frequency').textContent = `${(1/pulsar.userData.period).toFixed(3)} Hz`;
-      document.getElementById('pulsar-distance').textContent = `${pulsar.userData.distance.toFixed(2)} kpc`;
-      document.getElementById('pulsar-dm').textContent = `${pulsar.userData.dm.toFixed(2)} pc cm⁻³`;
-      
-      const gl = pulsar.userData.gl.toFixed(2);
-      const gb = pulsar.userData.gb.toFixed(2);
-      const coordsEl = document.getElementById('pulsar-coords');
-      if (coordsEl) coordsEl.textContent = `L: ${gl}°, B: ${gb}°`;
-      
-      // Play sound
-      playPulsarSound(pulsar.userData);
+  // Distance
+  const distEl = document.getElementById('public-distance');
+  if (star.dist_kpc) {
+    const ly = (star.dist_kpc * 3261.56).toFixed(0);
+    const event = getHistoricalEvent(star.dist_kpc);
+    distEl.innerHTML = `📍 <strong>${parseFloat(ly).toLocaleString()} light-years away</strong><br>
+      <span style="font-size:12px">Light now reaching us left ${event}</span>`;
+  } else {
+    distEl.textContent = '📍 Distance unknown';
+  }
+
+  // B-field
+  const bEl = document.getElementById('public-bfield');
+  if (star.bsurf_g) {
+    const earthRatio = (star.bsurf_g / 0.5).toExponential(1);
+    bEl.innerHTML = `🧲 <strong>${earthRatio}× Earth's magnetic field</strong><br>
+      <span style="font-size:12px">${star.bsurf_g.toExponential(2)} Gauss</span>`;
+  } else {
+    bEl.textContent = '🧲 Magnetic field unknown';
+  }
+
+  // Discovery year
+  const discEl = document.getElementById('public-discovery');
+  if (star.discovery_year) {
+    discEl.textContent = `🔭 Discovered in ${star.discovery_year}`;
+  } else {
+    discEl.textContent = '';
+  }
+
+  // Description
+  const descFn = CLASS_DESCRIPTIONS[cls] || (() => 'A compact neutron star remnant.');
+  document.getElementById('public-description').textContent = descFn(star);
+
+  // Magnetar outburst note
+  const magEl = document.getElementById('magnetar-outburst');
+  if (cls === 'MAGNETAR' && star.last_outburst_year) {
+    magEl.textContent = `⚡ Last known outburst: ${star.last_outburst_year}`;
+    magEl.classList.remove('hidden');
+  } else {
+    magEl.classList.add('hidden');
+  }
+}
+
+function fillResearcherView(star) {
+  const fmt = (v, d=4) => v != null ? v.toFixed(d) : '—';
+  const sci = (v) => v != null ? v.toExponential(3) : '—';
+
+  document.getElementById('r-p0').textContent = star.p0 != null ? `${(star.p0 * 1000).toFixed(4)} ms` : '—';
+  document.getElementById('r-p1').textContent = star.p1 != null ? star.p1.toExponential(3) : '—';
+  document.getElementById('r-dm').textContent = star.dm != null ? `${star.dm.toFixed(2)} cm⁻³pc` : '—';
+  document.getElementById('r-logb').textContent = star.bsurf_g != null ? Math.log10(star.bsurf_g).toFixed(2) : '—';
+  document.getElementById('r-age').textContent = star.age_yr != null ? sci(star.age_yr) + ' yr' : '—';
+  document.getElementById('r-edot').textContent = star.edot_ergs != null ? sci(star.edot_ergs) + ' erg/s' : '—';
+  document.getElementById('r-dist').textContent = star.dist_kpc != null ? `${star.dist_kpc.toFixed(3)} kpc` : '—';
+  document.getElementById('r-nglitch').textContent = star.nglitch != null ? star.nglitch : '—';
+  document.getElementById('r-binary').textContent = star.binary_model || '—';
+  document.getElementById('r-class').textContent = star.ns_class || star._cls || '—';
+  document.getElementById('r-coords').textContent = (star.gl != null && star.gb != null)
+    ? `l=${star.gl.toFixed(2)}° b=${star.gb.toFixed(3)}°` : '—';
+  document.getElementById('r-assoc').textContent = star.assoc || '—';
+
+  const atnfLink = document.getElementById('atnf-link');
+  atnfLink.href = `https://www.atnf.csiro.au/research/pulsar/psrcat/proc_form.php?Type=normal&Name=${encodeURIComponent(star.jname)}`;
+}
+
+async function fetchStarDetail(jname) {
+  try {
+    const res = await fetch(`/api/stars/${encodeURIComponent(jname)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+function getHistoricalEvent(dist_kpc) {
+  const ly = dist_kpc * 3261.56;
+  const yearAgo = Math.round(ly);
+  const year = 2024 - yearAgo;
+
+  if (ly < 50) return `just ${yearAgo} years ago`;
+  if (ly < 200) return `${yearAgo} years ago — around ${year > 0 ? year + ' CE' : Math.abs(year) + ' BCE'}`;
+  if (ly < 800) return `${yearAgo} years ago (${year > 0 ? year + ' CE' : Math.abs(year) + ' BCE'} — Medieval period)`;
+  if (ly < 1500) return `${yearAgo} years ago (${year > 0 ? year + ' CE' : Math.abs(year) + ' BCE'} — Age of Antiquity)`;
+  if (ly < 4000) return `${yearAgo} years ago — during ancient Egyptian civilization`;
+  if (ly < 12000) return `${yearAgo} years ago — dawn of human civilization`;
+  if (ly < 40000) return `${yearAgo} years ago — last Ice Age`;
+  if (ly < 100000) return `${yearAgo} years ago — early Homo sapiens`;
+  return `${(ly / 1000).toFixed(0)}k years ago — deep prehistoric time`;
+}
+
+// ── UI Setup ─────────────────────────────────────────────────────────────────
+function setupUI() {
+  // Fetch stats for class counts
+  fetch('/api/stats').then(r => r.json()).then(data => {
+    buildClassFilters(data.counts);
+  });
+
+  // View tabs
+  document.querySelectorAll('.view-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.view-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      setViewMode(btn.dataset.view);
+    });
+  });
+
+  // Researcher mode toggle
+  document.getElementById('researcher-mode').addEventListener('change', e => {
+    researcherMode = e.target.checked;
+    document.getElementById('fps-display').classList.toggle('hidden', !researcherMode);
+    document.getElementById('public-view').classList.toggle('hidden', researcherMode);
+    document.getElementById('researcher-view').classList.toggle('hidden', !researcherMode);
+    if (selectedStar && researcherMode) {
+      fetchStarDetail(selectedStar.jname).then(d => { if (d) fillResearcherView(d); });
     }
+  });
 
-    // Filter pulsars by type
-    function filterPulsars(mode) {
-      currentViewMode = mode;
-      
-      pulsars.forEach(pulsar => {
-        const period = pulsar.userData.period;
-        let visible = false;
-        
-        switch (mode) {
-          case 'all':
-            visible = true;
-            break;
-          case 'fast':
-            visible = period < CONFIG.fastPulsarThreshold;
-            break;
-          case 'slow':
-            visible = period >= CONFIG.slowPulsarThreshold;
-            break;
-        }
-        
-        pulsar.visible = visible;
-      });
-      
-      visiblePulsars = pulsars.filter(p => p.visible);
-      const countEl = document.getElementById('visible-count');
-      if (countEl) countEl.textContent = visiblePulsars.length;
-    }
+  // Audio toggle
+  document.getElementById('audio-toggle').addEventListener('click', () => {
+    audioEnabled = !audioEnabled;
+    const btn = document.getElementById('audio-toggle');
+    btn.textContent = audioEnabled ? '🔊' : '🔇';
+    btn.classList.toggle('active', audioEnabled);
+    if (audioEnabled) initAudio();
+  });
 
-    // Mouse interaction
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
+  // Close panel
+  document.getElementById('close-panel').addEventListener('click', deselectStar);
 
-    function onMouseClick(event) {
-      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-      
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(visiblePulsars);
-      
-      if (intersects.length > 0) {
-        selectPulsar(intersects[0].object);
-      } else {
-        deselectCurrentPulsar();
-      }
-    }
-
-    // Finish initialization
-    function finishInitialization() {
-      // Setup post-processing
-      composer = new EffectComposer(renderer);
-      composer.addPass(new RenderPass(scene, camera));
-      
-      bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(window.innerWidth, window.innerHeight),
-        CONFIG.bloomStrength,
-        CONFIG.bloomRadius,
-        CONFIG.bloomThreshold
-      );
-      composer.addPass(bloomPass);
-      
-      // Final setup
-      filterPulsars('all');
-      
-      // Complete loading
-      document.getElementById('progress').style.width = '100%';
-      setTimeout(() => {
-        const loadingScreen = document.getElementById('loading');
-        loadingScreen.style.opacity = '0';
-        setTimeout(() => {
-          loadingScreen.style.display = 'none';
-          isInitialized = true;
-        }, 600);
-      }, 500);
-      
-      console.log("Pulsar Galaxy Explorer initialized with", pulsars.length, "pulsars");
-    }
-
-    // Initialize visualization
-    function init() {
-      // Setup Three.js
-      scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x000011);
-      
-      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-      camera.position.set(0, 20, 40);
-      
-      renderer = new THREE.WebGLRenderer({
-        antialias: true
-      });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      document.body.appendChild(renderer.domElement);
-      
-      controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.05;
-      controls.maxDistance = 200;
-      
-      clock = new THREE.Clock();
-      
-      // Add lighting
-      const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
-      scene.add(ambientLight);
-      
-      // Initialize audio
+  // Play audio buttons
+  ['play-audio-btn', 'play-audio-btn-r'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', () => {
+      if (!selectedStar) return;
       initAudio();
-      
-      // Initialize video for info panel display
-      initVideo();
-      
-      // Create scene objects
-      createStarfield();
-      createPulsars();
-      
-      // Event listeners
-      window.addEventListener('click', onMouseClick, false);
-      window.addEventListener('resize', onWindowResize, false);
-      
-      // UI event listeners
-      document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          // Remove active class from all
-          document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-          // Add to clicked
-          e.target.classList.add('active');
-          // Filter
-          filterPulsars(e.target.dataset.filter);
-        });
-      });
-      
-      const closeVideoBtn = document.getElementById('close-video');
-      if (closeVideoBtn) {
-        closeVideoBtn.addEventListener('click', () => {
-          deselectCurrentPulsar();
-        });
-      }
-      
-      const muteBtn = document.getElementById('mute-btn');
-      if (muteBtn) {
-        muteBtn.addEventListener('click', () => {
-          audioEnabled = !audioEnabled;
-          muteBtn.textContent = audioEnabled ? '🔊 Mute Audio' : '🔇 Unmute Audio';
-          
-          if (audioEnabled) {
-            if (audioContext && audioContext.state === 'suspended') {
-              audioContext.resume();
+      audioEnabled = true;
+      document.getElementById('audio-toggle').textContent = '🔊';
+      playClickTone(selectedStar.audio_freq, 3);
+    });
+  });
+
+  // Sliders
+  setupSliders();
+
+  // Search
+  setupSearch();
+
+  // Random
+  document.getElementById('random-btn').addEventListener('click', () => {
+    const visibleStars = allStars.filter(s => s._visible);
+    if (!visibleStars.length) return;
+    const star = visibleStars[Math.floor(Math.random() * visibleStars.length)];
+    flyTo(star);
+    selectStar(star);
+  });
+
+  // Reset filters
+  document.getElementById('reset-filters').addEventListener('click', resetFilters);
+}
+
+function buildClassFilters(counts) {
+  const countMap = {};
+  counts.forEach(c => { countMap[c.ns_class] = c.count; });
+
+  const container = document.getElementById('class-filters');
+  container.innerHTML = '';
+
+  CLASS_ORDER.forEach(cls => {
+    const def = CLASS_DEF[cls];
+    const count = countMap[cls] || 0;
+    const colorHex = '#' + def.color.toString(16).padStart(6, '0');
+
+    const row = document.createElement('label');
+    row.className = 'class-row';
+    row.innerHTML = `
+      <input type="checkbox" checked data-cls="${cls}">
+      <span class="class-dot" style="background:${colorHex}"></span>
+      <span class="class-label">${def.label}</span>
+      <span class="class-count">${count.toLocaleString()}</span>
+    `;
+    row.querySelector('input').addEventListener('change', e => {
+      if (e.target.checked) filterState.classes.add(cls);
+      else filterState.classes.delete(cls);
+      applyFilters();
+    });
+    container.appendChild(row);
+  });
+}
+
+function setupSliders() {
+  const periodMin = document.getElementById('period-min');
+  const periodMax = document.getElementById('period-max');
+  const distMin = document.getElementById('dist-min');
+  const distMax = document.getElementById('dist-max');
+  const bfieldMin = document.getElementById('bfield-min');
+  const bfieldMax = document.getElementById('bfield-max');
+
+  function updatePeriod() {
+    const lo = Math.min(parseFloat(periodMin.value), parseFloat(periodMax.value));
+    const hi = Math.max(parseFloat(periodMin.value), parseFloat(periodMax.value));
+    filterState.periodMin = Math.pow(10, lo);
+    filterState.periodMax = Math.pow(10, hi);
+    document.getElementById('period-min-label').textContent = filterState.periodMin.toExponential(1);
+    document.getElementById('period-max-label').textContent = filterState.periodMax.toFixed(1);
+    applyFilters();
+  }
+
+  function updateDist() {
+    filterState.distMin = parseFloat(distMin.value);
+    filterState.distMax = parseFloat(distMax.value);
+    document.getElementById('dist-min-label').textContent = filterState.distMin.toFixed(0);
+    document.getElementById('dist-max-label').textContent = filterState.distMax.toFixed(0);
+    applyFilters();
+  }
+
+  function updateBfield() {
+    filterState.bfieldMin = Math.pow(10, parseFloat(bfieldMin.value));
+    filterState.bfieldMax = Math.pow(10, parseFloat(bfieldMax.value));
+    document.getElementById('bfield-min-label').textContent = parseFloat(bfieldMin.value).toFixed(0);
+    document.getElementById('bfield-max-label').textContent = parseFloat(bfieldMax.value).toFixed(0);
+    applyFilters();
+  }
+
+  periodMin.addEventListener('input', updatePeriod);
+  periodMax.addEventListener('input', updatePeriod);
+  distMin.addEventListener('input', updateDist);
+  distMax.addEventListener('input', updateDist);
+  bfieldMin.addEventListener('input', updateBfield);
+  bfieldMax.addEventListener('input', updateBfield);
+}
+
+function setupSearch() {
+  const box = document.getElementById('search-box');
+  const results = document.getElementById('search-results');
+  let searchTimer = null;
+
+  box.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = box.value.trim();
+    if (q.length < 2) { results.innerHTML = ''; return; }
+    searchTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        results.innerHTML = '';
+        data.slice(0, 8).forEach(star => {
+          const def = CLASS_DEF[star.ns_class] || CLASS_DEF.CANONICAL;
+          const colorHex = '#' + def.color.toString(16).padStart(6, '0');
+          const item = document.createElement('div');
+          item.className = 'search-result-item';
+          item.innerHTML = `<span class="sri-dot" style="background:${colorHex}"></span><span>${star.jname}</span><span style="font-size:10px;opacity:.6">${def.label}</span>`;
+          item.addEventListener('click', () => {
+            results.innerHTML = '';
+            box.value = '';
+            const cached = starIndexMap.get(star.jname);
+            if (cached) {
+              flyTo(cached);
+              selectStar(cached);
             }
-            if (selectedPulsar) playPulsarSound(selectedPulsar.userData);
-          } else {
-            stopPulsarSound();
-          }
+          });
+          results.appendChild(item);
         });
-      }
-    }
+      } catch(e) {}
+    }, 250);
+  });
+}
 
-    function deselectCurrentPulsar() {
-      if (selectedPulsar) {
-        selectedPulsar.scale.setScalar(selectedPulsar.userData.originalScale);
-        selectedPulsar.material.opacity = 0.9;
-        removePulsarEffects();
-        selectedPulsar = null;
-        
-        // Reset and hide video
-        if (pulsarVideo) {
-          pulsarVideo.playbackRate = 1.0;
-          pulsarVideo.pause();
-          pulsarVideo.style.display = 'none';
-        }
-        
-        document.getElementById('pulsar-details').classList.remove('visible');
-        // document.getElementById('selected-pulsar').textContent = 'None'; // Element might not exist
-        stopPulsarSound();
-      }
-    }
+function resetFilters() {
+  filterState.classes = new Set(CLASS_ORDER);
+  filterState.periodMin = 1e-3;
+  filterState.periodMax = 32;
+  filterState.distMin = 0;
+  filterState.distMax = 100;
+  filterState.bfieldMin = 1e8;
+  filterState.bfieldMax = 1e15;
 
-    // Window resize handler
-    function onWindowResize() {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      if (composer) {
-        composer.setSize(window.innerWidth, window.innerHeight);
-      }
-    }
+  // Reset UI
+  document.querySelectorAll('#class-filters input[type=checkbox]').forEach(cb => { cb.checked = true; });
+  document.getElementById('period-min').value = -3;
+  document.getElementById('period-max').value = 1.5;
+  document.getElementById('dist-min').value = 0;
+  document.getElementById('dist-max').value = 30;
+  document.getElementById('bfield-min').value = 8;
+  document.getElementById('bfield-max').value = 15;
+  document.getElementById('period-min-label').textContent = '0.001';
+  document.getElementById('period-max-label').textContent = '10';
+  document.getElementById('dist-min-label').textContent = '0';
+  document.getElementById('dist-max-label').textContent = '30';
+  document.getElementById('bfield-min-label').textContent = '8';
+  document.getElementById('bfield-max-label').textContent = '15';
 
-    // Animation loop
-    function animate() {
-      requestAnimationFrame(animate);
-      
-      if (!isInitialized) return;
-      
-      const deltaTime = clock.getDelta();
-      const elapsedTime = clock.getElapsedTime();
-      
-      // Animate pulsars
-      pulsars.forEach(pulsar => {
-        if (!pulsar.visible) return;
-        
-        // Billboard effect - make pulsars face camera
-        if (pulsar.userData.isBillboard) {
-          pulsar.lookAt(camera.position);
-        }
-        
-        // Gentle breathing animation for non-selected pulsars
-        if (pulsar !== selectedPulsar) {
-          const period = pulsar.userData.period;
-          const pulseFreq = Math.min(2, 1 / period); // Gentler animation
-          const pulse = Math.sin(elapsedTime * pulseFreq * Math.PI * 2) * 0.05 + 1;
-          pulsar.scale.setScalar(pulsar.userData.originalScale * pulse);
-        }
-      });
-      
-      // Update enhanced visual effects for selected pulsar
-      updatePulsarEffects(deltaTime, elapsedTime);
-      
-      // Update controls
-      controls.update();
-      
-      // Render
-      if (composer) {
-        composer.render();
-      } else {
-        renderer.render(scene, camera);
-      }
-    }
+  applyFilters();
+}
 
-    // Start the application
-    init();
-    animate();
+// ── Audio engine ──────────────────────────────────────────────────────────────
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function playClickTone(freq, duration = 3) {
+  if (!audioCtx) return;
+  stopClickTone();
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = freq > 200 ? 'sine' : 'sine';
+  osc.frequency.value = Math.max(40, Math.min(2000, freq || 440));
+  gain.gain.setValueAtTime(0, audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.25, audioCtx.currentTime + 0.05);
+  gain.gain.setValueAtTime(0.25, audioCtx.currentTime + duration - 0.3);
+  gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+  activeOsc = { osc, gain };
+}
+
+function stopClickTone() {
+  if (activeOsc) {
+    try { activeOsc.osc.stop(); } catch {}
+    activeOsc = null;
+  }
+}
+
+function playHoverTone(freq) {
+  if (!audioCtx || !audioEnabled) return;
+  stopHoverTone();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = Math.max(40, Math.min(2000, freq || 440));
+  gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.12);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.15);
+  hoverOsc = { osc, gain };
+}
+
+function stopHoverTone() {
+  if (hoverOsc) {
+    try { hoverOsc.osc.stop(); } catch {}
+    hoverOsc = null;
+  }
+}
+
+// ── Resize ────────────────────────────────────────────────────────────────────
+function onResize() {
+  const wrap = document.getElementById('canvas-wrap');
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+}
+
+// ── Loading helpers ───────────────────────────────────────────────────────────
+function setProgress(pct, msg) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+  if (msg) setStatus(msg);
+}
+
+function setStatus(msg) {
+  document.getElementById('loading-status').textContent = msg;
+}
+
+function fadeOutLoading() {
+  const el = document.getElementById('loading-screen');
+  el.classList.add('fade-out');
+  setTimeout(() => { el.style.display = 'none'; }, 900);
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+init().catch(err => {
+  console.error('Fatal init error:', err);
+  setStatus('Error: ' + err.message);
+});

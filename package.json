@@ -1,0 +1,16 @@
+{
+  "name": "pulsar-galaxy-explorer",
+  "version": "2.0.0",
+  "description": "Interactive 3D visualization of real pulsars and neutron stars",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "ingest": "node scripts/ingest.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "csv-parse": "^5.5.3",
+    "express": "^4.18.2"
+  }
+}

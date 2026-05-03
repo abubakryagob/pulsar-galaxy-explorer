@@ -4,9 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pulsar Galaxy Explorer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/css/style.css">
-  
-  <!-- Import Map for Three.js -->
+
   <script type="importmap">
     {
       "imports": {
@@ -17,92 +18,169 @@
   </script>
 </head>
 <body>
-  <div id="error-display"></div>
 
-  <div id="loading">
-    <span>Loading Pulsar Galaxy...</span>
-    <div id="progress-container">
-      <div id="progress"></div>
+<!-- ── Loading Screen ─────────────────────────────────────── -->
+<div id="loading-screen">
+  <div class="loading-inner">
+    <div class="pulse-graphic">
+      <div class="pulse-ring r1"></div>
+      <div class="pulse-ring r2"></div>
+      <div class="pulse-ring r3"></div>
+      <div class="pulse-dot"></div>
+    </div>
+    <h1 class="loading-title">Pulsar Galaxy Explorer</h1>
+    <p class="loading-sub" id="loading-status">Initializing data pipeline...</p>
+    <div class="progress-track">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+    <p class="loading-count" id="loading-count"></p>
+  </div>
+</div>
+
+<!-- ── Top Bar ────────────────────────────────────────────── -->
+<header id="topbar">
+  <div class="topbar-left">
+    <span class="app-title">🌌 Pulsar Galaxy Explorer</span>
+    <span class="data-badge" id="star-count-badge">Loading...</span>
+  </div>
+
+  <nav class="view-tabs">
+    <button class="view-tab active" data-view="galaxy">Galaxy 3D</button>
+    <button class="view-tab" data-view="topdown">Top-Down</button>
+    <button class="view-tab" data-view="edgeon">Edge-On</button>
+  </nav>
+
+  <div class="topbar-right">
+    <label class="mode-toggle" title="Toggle researcher mode">
+      <input type="checkbox" id="researcher-mode">
+      <span class="mode-label">Researcher</span>
+    </label>
+    <button class="icon-btn" id="audio-toggle" title="Toggle audio">🔇</button>
+  </div>
+</header>
+
+<!-- ── Main Canvas ────────────────────────────────────────── -->
+<div id="canvas-wrap">
+  <canvas id="three-canvas"></canvas>
+
+  <!-- Crosshair on hover -->
+  <div id="hover-label"></div>
+
+  <!-- Galactic coordinates readout -->
+  <div id="coords-hud" class="hud-chip">
+    <span id="hud-gl">Gl —</span>
+    <span id="hud-gb">Gb —</span>
+  </div>
+
+  <!-- FPS (researcher only) -->
+  <div id="fps-display" class="hud-chip hidden">FPS —</div>
+</div>
+
+<!-- ── Left Sidebar — Filters ────────────────────────────── -->
+<aside id="sidebar">
+  <div class="sidebar-header">
+    <span>Filters</span>
+    <button id="reset-filters" class="btn-sm">Reset</button>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="section-label">Object Classes</div>
+    <div id="class-filters">
+      <!-- Populated by JS -->
     </div>
   </div>
 
-  <div id="ui">
-    <div id="info">Pulsar Galaxy Explorer - 4,342 Pulsars with Real Video<br>
-    <small>Click pulsars to see real pulsar videos at their actual frequencies • Video speed adjusts to match each pulsar's period</small>
+  <div class="sidebar-section">
+    <div class="section-label">Period (seconds)</div>
+    <div class="range-row">
+      <span class="range-val" id="period-min-label">0.001</span>
+      <span class="range-val" id="period-max-label">10</span>
     </div>
+    <input type="range" class="slider" id="period-min" min="-3" max="1.5" step="0.05" value="-3">
+    <input type="range" class="slider" id="period-max" min="-3" max="1.5" step="0.05" value="1.5">
   </div>
 
-  <div id="audio-controls">
-    <button id="mute-btn">🔇 Unmute Audio</button>
-    <div class="volume-control">
-      <input type="range" id="volume-slider" min="0" max="100" value="15" title="Volume">
+  <div class="sidebar-section">
+    <div class="section-label">Distance (kpc)</div>
+    <div class="range-row">
+      <span class="range-val" id="dist-min-label">0</span>
+      <span class="range-val" id="dist-max-label">30</span>
     </div>
-    <div id="pulsar-sound-info">Select a pulsar to hear its frequency</div>
+    <input type="range" class="slider" id="dist-min" min="0" max="30" step="0.5" value="0">
+    <input type="range" class="slider" id="dist-max" min="0" max="30" step="0.5" value="30">
   </div>
 
-  <div id="controls-panel">
-    <div class="control-group">
-      <label>Filter Pulsars:</label>
-      <div class="btn-group">
-        <button class="filter-btn active" data-filter="all">All</button>
-        <button class="filter-btn" data-filter="fast" style="border-color: #4488ff; color: #4488ff;">Fast (&lt;0.1s)</button>
-        <button class="filter-btn" data-filter="medium" style="border-color: #00ffff; color: #00ffff;">Medium</button>
-        <button class="filter-btn" data-filter="slow" style="border-color: #aa44ff; color: #aa44ff;">Slow (&gt;1s)</button>
-      </div>
-      <div style="margin-top: 8px; font-size: 12px; color: #aaa; text-align: center;">
-        Visible: <span id="visible-count">--</span>
-      </div>
+  <div class="sidebar-section">
+    <div class="section-label">Magnetic Field (log₁₀ Gauss)</div>
+    <div class="range-row">
+      <span class="range-val" id="bfield-min-label">8</span>
+      <span class="range-val" id="bfield-max-label">15</span>
     </div>
+    <input type="range" class="slider" id="bfield-min" min="8" max="15" step="0.1" value="8">
+    <input type="range" class="slider" id="bfield-max" min="8" max="15" step="0.1" value="15">
   </div>
 
-  <div id="video-panel">
-    <div id="video-header">
-      <span id="video-title">Pulsar Emission</span>
-      <button id="close-video">×</button>
-    </div>
-    <div id="video-container">
-      <video id="pulsar-video" loop playsinline muted>
-        <source src="assets/media/PulsarWithProfile.480p.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-      </video>
-      <div id="video-overlay">
-        <div id="video-stats">
-          <div>PSR: <span id="vid-psr-name">--</span></div>
-          <div>Period: <span id="vid-psr-period">--</span> s</div>
-          <div>Playback: <span id="vid-playback-rate">1.0</span>x</div>
-        </div>
-      </div>
-    </div>
-    <div id="video-controls">
-      <div id="scan-line"></div>
-    </div>
+  <div class="sidebar-section">
+    <div class="section-label">Search</div>
+    <input type="text" id="search-box" class="search-input" placeholder="J or B name…">
+    <div id="search-results"></div>
   </div>
 
-  <div id="pulsar-details">
-    <h2 id="pulsar-name">Select a Pulsar</h2>
-    <div class="detail-row">
-      <span class="detail-label">Period:</span>
-      <span class="detail-value" id="pulsar-period">--</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Frequency:</span>
-      <span class="detail-value" id="pulsar-frequency">--</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Distance:</span>
-      <span class="detail-value" id="pulsar-distance">--</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">DM:</span>
-      <span class="detail-value" id="pulsar-dm">--</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-label">Coordinates:</span>
-      <span class="detail-value" id="pulsar-coords">--</span>
-    </div>
+  <div class="sidebar-section">
+    <button class="btn-full" id="random-btn">✦ Random Object</button>
   </div>
 
-  <!-- Main Application Script -->
-  <script type="module" src="assets/js/app.js"></script>
+  <div class="sidebar-footer" id="visible-count-display">
+    Showing — objects
+  </div>
+</aside>
+
+<!-- ── Right Panel — Object Detail ───────────────────────── -->
+<div id="detail-panel">
+  <div class="panel-header">
+    <div>
+      <div class="panel-name" id="panel-jname">Select an object</div>
+      <div class="panel-badge" id="panel-class-badge"></div>
+    </div>
+    <button class="close-btn" id="close-panel">✕</button>
+  </div>
+
+  <!-- PUBLIC VIEW -->
+  <div id="public-view">
+    <div class="hero-stat" id="public-spin-stat"></div>
+    <div class="public-row" id="public-distance"></div>
+    <div class="public-row" id="public-bfield"></div>
+    <div class="public-row" id="public-discovery"></div>
+    <div class="public-desc" id="public-description"></div>
+    <div class="magnetar-note hidden" id="magnetar-outburst"></div>
+    <button class="audio-play-btn" id="play-audio-btn">▶ Play Frequency</button>
+  </div>
+
+  <!-- RESEARCHER VIEW -->
+  <div id="researcher-view" class="hidden">
+    <table class="data-table">
+      <tbody>
+        <tr><td class="dt-label">Period P₀</td><td class="dt-val mono" id="r-p0">—</td></tr>
+        <tr><td class="dt-label">Ṗ (P₁)</td><td class="dt-val mono" id="r-p1">—</td></tr>
+        <tr><td class="dt-label">DM</td><td class="dt-val mono" id="r-dm">—</td></tr>
+        <tr><td class="dt-label">log₁₀(B)</td><td class="dt-val mono" id="r-logb">—</td></tr>
+        <tr><td class="dt-label">Char. Age</td><td class="dt-val mono" id="r-age">—</td></tr>
+        <tr><td class="dt-label">Ėdot</td><td class="dt-val mono" id="r-edot">—</td></tr>
+        <tr><td class="dt-label">Distance</td><td class="dt-val mono" id="r-dist">—</td></tr>
+        <tr><td class="dt-label">Dist. method</td><td class="dt-val" id="r-distmethod">DM / YMW16</td></tr>
+        <tr><td class="dt-label">Glitches (Nᵍ)</td><td class="dt-val mono" id="r-nglitch">—</td></tr>
+        <tr><td class="dt-label">Binary type</td><td class="dt-val mono" id="r-binary">—</td></tr>
+        <tr><td class="dt-label">Class</td><td class="dt-val mono" id="r-class">—</td></tr>
+        <tr><td class="dt-label">Galactic (l,b)</td><td class="dt-val mono" id="r-coords">—</td></tr>
+        <tr><td class="dt-label">ASSOC</td><td class="dt-val mono" id="r-assoc">—</td></tr>
+      </tbody>
+    </table>
+    <a class="atnf-link" id="atnf-link" href="#" target="_blank" rel="noopener">View in ATNF Catalogue →</a>
+    <button class="audio-play-btn" id="play-audio-btn-r">▶ Play Frequency</button>
+  </div>
+</div>
+
+<!-- Main script -->
+<script type="module" src="assets/js/app.js"></script>
 </body>
 </html>
