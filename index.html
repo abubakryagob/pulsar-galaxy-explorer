@@ -144,7 +144,10 @@
       <div class="panel-name" id="panel-jname">Select an object</div>
       <div class="panel-badge" id="panel-class-badge"></div>
     </div>
-    <button class="close-btn" id="close-panel">✕</button>
+    <div class="panel-header-actions">
+      <button class="share-btn" id="share-btn" title="Copy link to this star">🔗 Share</button>
+      <button class="close-btn" id="close-panel">✕</button>
+    </div>
   </div>
 
   <!-- PUBLIC VIEW -->
@@ -228,6 +231,9 @@
     <button id="ppdot-goto-3d">View in Galaxy →</button>
   </div>
 </div>
+
+<!-- Copy-link toast -->
+<div id="copy-toast">🔗 Link copied to clipboard!</div>
 
 <!-- Main script -->
 <script type="module" src="assets/js/app.js"></script>

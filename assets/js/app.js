@@ -139,6 +139,18 @@ async function init() {
     clock = new THREE.Clock();
     animate();
   }
+
+  // Deep-link: ?star=JNAME
+  const deepStarName = new URLSearchParams(window.location.search).get('star');
+  if (deepStarName) {
+    const deepStar = starIndexMap.get(deepStarName);
+    if (deepStar) {
+      setTimeout(() => {
+        if (webglOk) flyTo(deepStar);
+        selectStar(deepStar);
+      }, 800);
+    }
+  }
 }
 
 // ── Scene setup ───────────────────────────────────────────────────────────────
@@ -620,6 +632,10 @@ function selectStar(star) {
   if (audioEnabled) playClickTone(star.audio_freq);
   // Cross-link: highlight on P-Ṗ diagram if open
   if (ppdotDiagram) ppdotDiagram.highlight(star.jname);
+  // Update URL for shareability
+  const url = new URL(window.location.href);
+  url.searchParams.set('star', star.jname);
+  history.replaceState(null, '', url.toString());
 }
 
 function deselectStar() {
@@ -630,6 +646,10 @@ function deselectStar() {
   document.getElementById('detail-panel').classList.remove('open');
   document.getElementById('ppdot-wrap').classList.remove('panel-open');
   stopClickTone();
+  // Clear star from URL
+  const url = new URL(window.location.href);
+  url.searchParams.delete('star');
+  history.replaceState(null, '', url.searchParams.toString() ? url.toString() : window.location.pathname);
 }
 
 function restoreStarSize(star) {
@@ -864,6 +884,28 @@ function setupUI() {
 
   // Close panel
   document.getElementById('close-panel').addEventListener('click', deselectStar);
+
+  // Share button — copy permalink to clipboard
+  document.getElementById('share-btn').addEventListener('click', () => {
+    if (!selectedStar) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('star', selectedStar.jname);
+    navigator.clipboard.writeText(url.toString()).then(() => {
+      const btn = document.getElementById('share-btn');
+      const toast = document.getElementById('copy-toast');
+      btn.textContent = '✓ Copied!';
+      btn.classList.add('copied');
+      toast.classList.add('visible');
+      setTimeout(() => {
+        btn.textContent = '🔗 Share';
+        btn.classList.remove('copied');
+        toast.classList.remove('visible');
+      }, 2200);
+    }).catch(() => {
+      // Fallback: prompt with URL
+      prompt('Copy this link:', url.toString());
+    });
+  });
 
   // Play audio buttons
   ['play-audio-btn', 'play-audio-btn-r'].forEach(id => {

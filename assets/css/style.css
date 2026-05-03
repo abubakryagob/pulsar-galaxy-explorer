@@ -489,6 +489,52 @@ html, body {
   margin-top: 5px;
   display: inline-block;
 }
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.share-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.share-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.share-btn.copied {
+  border-color: #44cc88;
+  color: #44cc88;
+}
+/* Copy toast */
+#copy-toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: rgba(10, 20, 50, 0.92);
+  border: 1px solid #44cc88;
+  color: #44cc88;
+  font-size: 13px;
+  padding: 9px 20px;
+  border-radius: 8px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s, transform 0.25s;
+  z-index: 9999;
+}
+#copy-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
 .close-btn {
   background: transparent;
   border: 1px solid var(--border);
