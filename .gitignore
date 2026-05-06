@@ -42,3 +42,19 @@ build/
 # Qodo AI
 .qodo/
 history.txt
+
+# SQLite database (generated from CSV via ingest.js)
+*.db
+*.sqlite
+*.sqlite3
+
+# Replit config
+.replit
+replit.nix
+
+# SQLite database (generated from CSV via ingest.js)
+*.db
+*.sqlite
+*.sqlite3
+.replit
+.replit.nix
