@@ -1,143 +1,172 @@
 # 🌌 Pulsar Galaxy Explorer
 
-An interactive 3D visualization of pulsars in our galaxy with real astronomical data, authentic audio frequencies, and actual pulsar emission videos.
+An interactive 3D visualization of **4,355 neutron stars** in our galaxy — pulsars, magnetars, RRATs, millisecond pulsars, and more — built on real astronomical data from the ATNF Pulsar Catalogue and McGill Magnetar Catalogue.
 
-![Pulsar Galaxy Explorer](https://img.shields.io/badge/WebGL-Three.js-brightgreen) ![Audio](https://img.shields.io/badge/Audio-Web_Audio_API-blue) ![Data](https://img.shields.io/badge/Data-4342_Pulsars-orange)
+[![WebGL](https://img.shields.io/badge/WebGL-Three.js-brightgreen)](https://threejs.org)
+[![Backend](https://img.shields.io/badge/Backend-Express%205000-blue)](https://expressjs.com)
+[![Database](https://img.shields.io/badge/Data-SQLite%20%2B%20ATNF-orange)](https://www.atnf.csiro.au/research/pulsar/psrcat/)
+[![Objects](https://img.shields.io/badge/Objects-4%2C355%20Neutron%20Stars-purple)](https://github.com/abubakryagob/pulsar-galaxy-explorer)
+
+---
 
 ## ✨ Features
 
-### 🎯 **Scientific Accuracy**
-- **4,342 real pulsars** from astronomical catalogs
-- **Authentic galactic coordinates** positioning
-- **Real pulsar periods** converted to audible frequencies
-- **Point-source representation** (how pulsars actually appear from Earth)
+### 🔬 Scientific Data Pipeline
+- **4,355 real neutron star objects** from ATNF v2.7.0 + McGill Magnetar Catalogue
+- **7 object classes** automatically classified: Canonical Pulsar, Recycled MSP, Fast MSP, RRAT, Magnetar, Binary Pulsar, Isolated Neutron Star
+- **Derived physical properties** computed per object: surface magnetic field (B_surf), characteristic age, spin-down luminosity (Ėdot), audio frequency
+- **SQLite backend** regenerated on demand from raw CSV source data
 
-### 🎵 **Audio Integration**
-- **Real-time audio synthesis** matching actual pulsar frequencies
-- **Period-to-frequency conversion** (milliseconds → Hz)
-- **Interactive sound control** with mute/unmute toggle
+### 🎨 3D Visualization (Three.js)
+- **InstancedMesh rendering** — one draw call per class (8 total) for all 4,351 visible objects
+- **Per-class visual identity**: magnetars pulse red, RRATs flicker in/out, MSPs glow rapidly, binaries render cyan
+- **60,000-particle galactic star field** with 4 spiral arm traces
+- **Coordinate grid**, ☉ Sun marker, Galactic Centre marker with labels
+- **3 camera modes**: Galaxy 3D / Top-Down / Edge-On with smooth animated transitions
 
-### 📹 **Video Integration**
-- **Real pulsar emission video** (`PulsarWithProfile.480p.mp4`)
-- **Speed-matched playback** adjusted to each pulsar's frequency
-- **Separate video panel** for authentic visualization while maintaining scientific accuracy
+### 🔭 Interactive Controls
+- **Left sidebar**: class checkboxes with live counts, 3 range sliders (period / distance / B-field), live search, random object selector
+- **Right detail panel**:
+  - *Public mode*: plain-English spin rates, historical distance analogies, magnetic field comparisons
+  - *Researcher mode*: P₀, Ṗ, DM, log(B), Age, Ėdot, glitch count, binary type, direct ATNF catalogue link
+- **Interactive P-Ṗ diagram** with cross-linking to the 3D view
+- **Cinematic tour mode** for guided galaxy exploration
+- **Deep-link / shareable URLs** per star
 
-### 🎨 **Enhanced Visual Effects**
-- **Particle effects** for selected pulsars
-- **Bloom post-processing** for realistic glow
-- **Color-coded by rotation speed**:
-  - 🔵 **Blue**: Fast pulsars (< 0.1s period)
-  - 🟢 **Cyan**: Medium pulsars (0.1s - 1.0s period)  
-  - 🟣 **Purple**: Slow pulsars (> 1.0s period)
+### 🎵 Audio
+- **Web Audio API** engine: hover ticks + 3-second click tones at each pulsar's real audio frequency
+- Period-to-frequency conversion (ms → Hz) using real rotation periods
 
-### 🔧 **Interactive Controls**
-- **Click any pulsar** to view detailed information
-- **Filter by speed**: All, Fast, or Slow pulsars
-- **Audio toggle** with visual feedback
-- **Orbital camera controls** for 3D navigation
+---
 
 ## 🚀 Quick Start
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/yourusername/pulsar-galaxy-explorer.git
-   cd pulsar-galaxy-explorer
-   ```
+### Prerequisites
+- [Node.js](https://nodejs.org) v18 or later
+- `npm`
 
-2. **Start a local server**:
-   ```bash
-   python3 -m http.server 8000
-   ```
-   *Or use any HTTP server (Node.js, Apache, nginx, etc.)*
+### Installation
 
-3. **Open in browser**:
-   ```
-   http://localhost:8000/
-   ```
+```bash
+# 1. Clone the repository
+git clone https://github.com/abubakryagob/pulsar-galaxy-explorer.git
+cd pulsar-galaxy-explorer
+
+# 2. Install dependencies
+npm install
+
+# 3. Generate the database from raw CSV data
+node scripts/ingest.js
+
+# 4. Start the server
+node server.js
+```
+
+Then open **http://localhost:5000** in your browser.
+
+> **Note:** Step 3 must be run at least once before starting the server. It reads the CSV files in `data/` and writes `data/neutron_stars.db`. Re-run it any time you update the source CSVs.
+
+---
 
 ## 📁 Project Structure
 
 ```
 pulsar-galaxy-explorer/
-├── index.html                  # Entry point
+├── index.html                  # App entry point (served by Express)
+├── server.js                   # Express server — REST API on port 5000
+├── package.json                # Node dependencies
+├── .env.example                # Environment variable template
+│
 ├── assets/
-│   ├── css/                    # Stylesheets
-│   ├── js/                     # Application logic
-│   ├── data/                   # Astronomical data
-│   └── media/                  # Videos and images
-├── scripts/                    # Data processing scripts
-└── README.md                   # Documentation
+│   ├── css/                    # Stylesheets (Space Grotesk + JetBrains Mono)
+│   ├── js/                     # Three.js app, rendering, audio, UI
+│   └── media/                  # Videos, images
+│
+├── data/
+│   ├── atnf_v2.7.0.csv         # ATNF Pulsar Catalogue source data
+│   ├── mcgill_magnetars.csv    # McGill Magnetar Catalogue source data
+│   └── neutron_stars.db        # ⚠️ Generated — not tracked in git
+│
+└── scripts/
+    └── ingest.js               # Data pipeline: CSV → classification → SQLite
 ```
 
-## 🎮 How to Use
+---
 
-1. **Navigate**: Use mouse to orbit, zoom, and pan around the galaxy
-2. **Select Pulsars**: Click on any point of light to see detailed information
-3. **Listen**: Selected pulsars play audio at their real frequencies
-4. **Watch**: Real pulsar video plays in the info panel at matched speed
-5. **Filter**: Use buttons to show different pulsar types
-6. **Audio Control**: Toggle sound on/off with the speaker button
+## 🔌 API Reference
+
+The Express server exposes the following endpoints on port 5000:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/stars` | All neutron star objects |
+| `GET` | `/api/stars/:jname` | Single object by J-name |
+| `GET` | `/api/stars/class/:cls` | Objects filtered by class |
+| `GET` | `/api/stats` | Summary statistics (counts per class, etc.) |
+| `GET` | `/api/ppdot` | P-Ṗ diagram data |
+| `GET` | `/api/search?q=` | Full-text search |
+| `POST` | `/api/refresh` | Re-run ingest pipeline and reload database |
+
+### Object Classes
+
+| Class | Description |
+|-------|-------------|
+| `Canonical` | Standard rotation-powered pulsars |
+| `Recycled MSP` | Recycled millisecond pulsars |
+| `Fast MSP` | Fast millisecond pulsars (P < 5ms) |
+| `RRAT` | Rotating Radio Transients |
+| `Magnetar` | Magnetars (from McGill catalogue) |
+| `Binary Pulsar` | Pulsars in binary systems |
+| `Isolated NS` | Isolated neutron stars |
+
+---
 
 ## 🔬 Technical Details
 
-### **Technologies Used**
-- **Three.js v0.163.0**: 3D rendering engine
-- **Web Audio API**: Real-time audio synthesis
-- **HTML5 Video**: Pulsar emission visualization
-- **WebGL**: Hardware-accelerated graphics
+### Technologies
+- **Three.js r163** — 3D rendering with WebGL
+- **Express.js** — REST API backend
+- **SQLite** (via `better-sqlite3`) — local database, generated from CSV
+- **Web Audio API** — real-time audio synthesis
+- **Space Grotesk + JetBrains Mono** — typography
 
-### **Data Processing**
-- Source: Astronomical pulsar catalogs
-- Format: CSV → JavaScript array
-- Validation: Coordinates, periods, distances
-- Statistics: Fast/Medium/Slow categorization
+### Data Sources
+- [ATNF Pulsar Catalogue v2.7.0](https://www.atnf.csiro.au/research/pulsar/psrcat/) — Manchester et al. (2005)
+- [McGill Magnetar Catalogue](https://www.physics.mcgill.ca/~pulsar/magnetar/main.html) — Olausen & Kaspi (2014)
 
-### **Performance Optimizations**
-- Chunked loading for 4,000+ objects
-- Distance-based culling
-- LOD (Level of Detail) for far objects
-- Efficient particle systems
+### Performance
+- `InstancedMesh` per class — 8 draw calls for all visible objects
+- Distance-based culling and LOD for far objects
+- Chunked loading for smooth initial render
+
+---
 
 ## 🌟 Scientific Background
 
-**Pulsars** are rapidly rotating neutron stars that emit beams of radiation. As they spin, these beams sweep across space like lighthouse beams. When a beam points toward Earth, we detect a pulse of radio waves.
+**Pulsars** are rapidly rotating neutron stars emitting beams of electromagnetic radiation. As they spin, these beams sweep across space like lighthouse beams — when one points toward Earth, we detect a pulse.
 
-- **Period Range**: 1.4ms to 23 seconds
-- **Discovery**: First found in 1967
-- **Formation**: Supernova remnants
-- **Applications**: GPS-like navigation for spacecraft
+- **Period range**: 1.4 ms to 23 seconds
+- **First discovery**: 1967 (Jocelyn Bell Burnell)
+- **Formation**: Remnants of core-collapse supernovae
+- **Magnetars**: Subset with extreme magnetic fields (~10¹⁵ G), prone to outbursts and giant flares
 
-## 🎯 Educational Value
-
-This visualization helps understand:
-- **Scale of our galaxy** (50,000+ light-years across)
-- **Pulsar distribution** throughout the Milky Way
-- **Relationship between rotation and age**
-- **Real astronomical measurement techniques**
+---
 
 ## 🤝 Contributing
 
-Contributions welcome! Areas for improvement:
-- Additional astronomical objects (black holes, quasars)
+Contributions welcome. Areas for future development:
+
+- Extended object types (black holes, quasars, SNRs)
 - VR/AR support
-- More detailed pulsar information
-- Performance optimizations
-- Mobile responsiveness
+- Mobile responsiveness improvements
+- Additional catalogue integrations
+- Gravitational wave source overlay
 
-## 📊 Data Credits
-
-Pulsar data sourced from:
-- **ATNF Pulsar Catalogue**
-- **Jodrell Bank Observatory**
-- **Various radio astronomy surveys**
-
-Video content:
-- **Real pulsar emission profiles**
-- **Radio telescope observations**
+---
 
 ## 📜 License
 
-MIT License - feel free to use for educational and research purposes.
+MIT License — free to use for educational and research purposes.
 
 ---
 

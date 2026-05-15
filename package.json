@@ -1,16 +1,31 @@
 {
   "name": "pulsar-galaxy-explorer",
-  "version": "2.0.0",
-  "description": "Interactive 3D visualization of real pulsars and neutron stars",
+  "version": "1.0.0",
+  "description": "Interactive 3D visualization of 4,355 neutron stars using real ATNF + McGill catalogue data",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
-    "ingest": "node scripts/ingest.js"
+    "ingest": "node scripts/ingest.js",
+    "setup": "node scripts/ingest.js && node server.js",
+    "dev": "node --watch server.js"
   },
+  "keywords": [
+    "pulsars",
+    "astronomy",
+    "astrophysics",
+    "threejs",
+    "webgl",
+    "visualization",
+    "neutron-stars",
+    "magnetars"
+  ],
+  "author": "abubakryagob",
+  "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^9.4.3",
-    "csv-parse": "^5.5.3",
     "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
